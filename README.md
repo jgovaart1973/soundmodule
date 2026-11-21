@@ -21,7 +21,7 @@ Opnemen en arrangeren (GarageBand-niveau) volgen in fase 2.
 ## Bouwen op Windows
 
 **Eenmalig installeren**
-1. [Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/) met de workload *Desktop development with C++* (bevat CMake).
+1. [Visual Studio Community (2022 of nieuwer)](https://visualstudio.microsoft.com/vs/community/) met de workload *Desktop development with C++* (bevat CMake).
 2. [Git voor Windows](https://git-scm.com/download/win).
 
 **Bouwen**

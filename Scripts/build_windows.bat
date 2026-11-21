@@ -3,7 +3,7 @@ rem ===========================================================================
 rem  KlankModule - Windows x64 build
 rem
 rem  Requirements (one time):
-rem    - Visual Studio 2022 (Community is free) with "Desktop development with C++"
+rem    - Visual Studio 2022 or newer (Community is free) with "Desktop development with C++"
 rem    - CMake 3.22+ (included with Visual Studio) and Git
 rem  Optional:
 rem    - Steinberg ASIO SDK unzipped to ThirdParty\asiosdk  (enables ASIO)
@@ -31,7 +31,8 @@ if /i "%1"=="nosfz" set EXTRA=%EXTRA% -DKM_WITH_SFIZZ=OFF
 
 echo.
 echo === Configureren (de eerste keer worden JUCE, sfizz en Catch2 gedownload) ===
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 %EXTRA%
+rem No -G: CMake picks the newest installed Visual Studio (2022 or later)
+cmake -S . -B build -A x64 %EXTRA%
 if errorlevel 1 exit /b 1
 
 echo.

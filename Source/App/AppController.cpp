@@ -25,6 +25,8 @@ AppController::AppController()
     opts.filenameSuffix = ".xml";
     opts.storageFormat = juce::PropertiesFile::storeAsXML;
     settings = std::make_unique<juce::PropertiesFile> (paths::settingsFile(), opts);
+    songController = std::make_unique<SongController> (*this, engine.sequencer);
+    songController->onStatus = [this] (const juce::String& m) { setStatus (m); };
 }
 
 AppController::~AppController()
@@ -108,6 +110,8 @@ void AppController::initialise()
         applyPerformance (Performance::makeDefault());
     }
 
+    songController->restoreAutosave();
+
     initialised = true;
     lastAutosave = juce::Time::getMillisecondCounter();
     startTimerHz (30);
@@ -168,6 +172,12 @@ void AppController::shutdown()
         back.add (*released);
     for (auto* inst : back)
         pool.release (inst);
+
+    // Audio is off: keep a recording that was still running, then save the song.
+    songController->tick();
+    songController->finishRecording();
+    songController->writeAutosave();
+    settings->saveIfNeeded();
     assigned.fill (nullptr);
 }
 
@@ -223,6 +233,13 @@ void AppController::timerCallback()
     if (learnChangedSomething.exchange (false))
         dirty = true;
 
+    songController->tick();
+
+    // Knobs turned in a plug-in's own window: the performance now differs from the saved file.
+    for (auto* inst : assigned)
+        if (inst != nullptr && inst->consumeEditedFlag())
+            dirty = true;
+
     const auto now = juce::Time::getMillisecondCounter();
 
     // Recover from audio dropouts / unplugged interfaces.
@@ -242,6 +259,7 @@ void AppController::timerCallback()
     {
         lastAutosave = now;
         writeAutosave();
+        songController->writeAutosave();
     }
 }
 
@@ -327,6 +345,19 @@ void AppController::captureRealtimeIntoModel()
     performance.master.limiterThresholdDb = m.limiterThresholdDb;
 }
 
+Performance AppController::capturePerformance()
+{
+    captureRealtimeIntoModel();
+    return performance;
+}
+
+void AppController::applyPerformanceFromSong (const Performance& p)
+{
+    currentFile = juce::File();
+    settings->setValue ("currentFile", juce::String());
+    applyPerformance (p);
+}
+
 void AppController::applyPerformance (const Performance& p)
 {
     performance = p;
@@ -372,6 +403,10 @@ void AppController::resolveInputSlots()
 //==============================================================================
 void AppController::lendToPart (int part, Instrument* inst)
 {
+    // Restoring a saved plug-in state reports "changed": that is not a user edit.
+    if (inst != nullptr)
+        inst->consumeEditedFlag();
+
     if (auto* notAdopted = engine.getPart (part).lend (inst))
         pool.release (notAdopted);
     // The previously adopted instrument (if any) comes back through engine.releaseQueue.

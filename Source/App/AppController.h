@@ -6,6 +6,7 @@
 #include "Midi/MidiRouter.h"
 #include "Model/Performance.h"
 #include "Model/ProgramMap.h"
+#include "App/SongController.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -59,6 +60,12 @@ public:
     int getCurrentPerformanceIndex() const;
     juce::File getCurrentFile() const { return currentFile; }
     void rescanPerformanceFolder();
+
+    /** Current sounds incl. live knob positions and plug-in states (for saving into songs). */
+    Performance capturePerformance();
+    /** Loading a song: use its sounds, detached from any .kmperf file. */
+    void applyPerformanceFromSong (const Performance& p);
+    SongController& getSongController() noexcept { return *songController; }
 
     //== global ================================================================
     void panic();
@@ -120,6 +127,7 @@ private:
     juce::AudioDeviceManager deviceManager;
     std::unique_ptr<juce::PropertiesFile> settings;
     ProgramMap programMap;
+    std::unique_ptr<SongController> songController;
 
     Performance performance;
     juce::File currentFile;

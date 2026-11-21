@@ -53,7 +53,13 @@ De audio-thread wacht nooit en alloceert niets:
 | `Source/Render` | Offline renderen: MIDI-bestand naar WAV |
 | `Tests` | Catch2-tests: filters, wachtrij, JSON, engine, MIDI Learn, sessie opslaan/herstellen |
 
-## Uitbreiden in fase 2
-- Sequencer als extra bron van `MidiEvent`s die de engine al begrijpt (`source = -1`).
-- Opnemen: een ringbuffer achter de MIDI-router ("retrospective record") en de audio-uitgang.
-- Offline export bestaat al als `OfflineRenderer`.
+## Arranger (fase 2a)
+- `Sequencer` (in de engine, audio-thread): transport, loop, metronoom en aftellen. Speelt een
+  onveranderlijke `PlaybackSnapshot` af; events gaan met `targetPart` rechtstreeks naar hun part.
+- Elke part meldt wat hij van een keyboard ontvangt aan `Sequencer::capture` (na split, transpose en curve).
+  Die zet het met maat/tel-positie in een lock-free wachtrij.
+- `SongController` (message-thread) maakt daar clips van: per gewapend spoor, met een nieuwe take per
+  loop-ronde, en bewaart alles ook 10 minuten voor *Vastleggen* achteraf.
+- Bij elke wijziging bouwt de `SongController` een nieuwe snapshot; de oude wordt pas vrijgegeven als de
+  audio-thread hem heeft losgelaten.
+- `OfflineRenderer::renderEvents` exporteert een nummer naar WAV/FLAC via dezelfde engine.

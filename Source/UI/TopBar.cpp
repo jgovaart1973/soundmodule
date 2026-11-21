@@ -27,6 +27,18 @@ TopBar::TopBar (AppController& c) : controller (c)
     panicButton.onClick = [this] { controller.panic(); };
 
     settingsButton.onClick = [this] { if (onSettings) onSettings(); };
+
+    for (auto* b : { &moduleView, &arrangerView })
+    {
+        addAndMakeVisible (*b);
+        b->setRadioGroupId (101);
+        b->setClickingTogglesState (true);
+    }
+    moduleView.setToggleState (true, juce::dontSendNotification);
+    moduleView.setTooltip ("Klankmodule: parts, klanken en mixer (F1)");
+    arrangerView.setTooltip ("Opnemen en arrangeren (F2)");
+    moduleView.onClick = [this] { if (moduleView.getToggleState() && onView) onView (false); };
+    arrangerView.onClick = [this] { if (arrangerView.getToggleState() && onView) onView (true); };
     zoomOut.onClick = [this] { if (onZoom) onZoom (-0.1f); };
     zoomIn.onClick = [this] { if (onZoom) onZoom (0.1f); };
 
@@ -121,10 +133,19 @@ void TopBar::tick()
     cpuLabel.setText (status, juce::dontSendNotification);
 }
 
+void TopBar::setView (bool arranger)
+{
+    (arranger ? arrangerView : moduleView).setToggleState (true, juce::dontSendNotification);
+}
+
 void TopBar::resized()
 {
     auto area = getLocalBounds().reduced (8, 8);
     auto place = [&area] (juce::Component& c, int w) { c.setBounds (area.removeFromLeft (w)); area.removeFromLeft (6); };
+
+    moduleView.setBounds (area.removeFromLeft (80));
+    arrangerView.setBounds (area.removeFromLeft (86));
+    area.removeFromLeft (14);
 
     place (prevButton, 36);
     place (performanceBox, 260);

@@ -35,6 +35,9 @@ public:
     virtual juce::AudioProcessorEditor* createEditor() { return nullptr; }
     virtual juce::String getStateBase64() const { return {}; }
 
+    /** True once after the sound was edited live (e.g. in the plug-in's own window). Any thread. */
+    virtual bool consumeEditedFlag() noexcept { return false; }
+
     /** Key this instance was created from (kept up to date by the pool, message thread only). */
     InstrumentKey key;
 };

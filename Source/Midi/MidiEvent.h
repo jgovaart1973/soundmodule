@@ -14,6 +14,7 @@ constexpr int kMaxMidiSources = 32;
 struct MidiEvent
 {
     int8_t  source = -1;   ///< device slot (0..kMaxMidiSources-1), -1 = internal/offline
+    int8_t  targetPart = -1; ///< >= 0: sequencer playback straight to this part (no routing/filters)
     uint8_t size = 0;      ///< 1..3 bytes
     uint8_t data[3] {};
 

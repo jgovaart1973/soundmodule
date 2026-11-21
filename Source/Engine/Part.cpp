@@ -1,5 +1,7 @@
 #include "Engine/Part.h"
 
+#include "Engine/Sequencer.h"
+
 namespace km
 {
 namespace
@@ -117,19 +119,37 @@ void Part::sendToTail (const uint8_t* data, int size, int pos) noexcept
         tailMidi.addEvent (data, size, pos);
 }
 
+void Part::record (const uint8_t* data, int size, int pos) noexcept
+{
+    if (recorder != nullptr)
+        recorder->capture (index, data, size, pos);
+}
+
 void Part::handleEvent (const MidiEvent& e, int pos) noexcept
 {
-    // Input + channel routing
-    const int slot = params.inputSlot.load (std::memory_order_relaxed);
-    if (slot != -1 && slot != e.source)
-        return;
+    // Song playback goes straight to its part: no input/channel routing, splits or curves
+    // (those were already applied when it was recorded).
+    const bool direct = e.targetPart >= 0;
 
-    const int wantedChannel = params.channel.load (std::memory_order_relaxed);
-    if (wantedChannel != 0 && wantedChannel != e.channel())
-        return;
+    if (direct)
+    {
+        if (e.targetPart != index)
+            return;
+    }
+    else
+    {
+        // Input + channel routing
+        const int slot = params.inputSlot.load (std::memory_order_relaxed);
+        if (slot != -1 && slot != e.source)
+            return;
+
+        const int wantedChannel = params.channel.load (std::memory_order_relaxed);
+        if (wantedChannel != 0 && wantedChannel != e.channel())
+            return;
+    }
 
     const int ch = e.channel() - 1;
-    const bool enabled = params.enabled.load (std::memory_order_relaxed);
+    const bool enabled = direct || params.enabled.load (std::memory_order_relaxed);
 
     // Note-offs and pedal-up must always get through, even for a part that was just disabled.
     if (e.isNoteOff())
@@ -143,6 +163,8 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
         if (o == ownerCurrent) sendToCurrent (msg, 3, pos);
         else                   sendToTail (msg, 3, pos);
         owner[ch][note] = none;
+        if (! direct)
+            record (msg, 3, pos);
         return;
     }
 
@@ -151,6 +173,8 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
         sustainDown[ch] = e.data[2] >= 64;
         sendToCurrent (e.data, 3, pos);
         sendToTail (e.data, 3, pos);
+        if (! direct && enabled)
+            record (e.data, 3, pos);
         return;
     }
 
@@ -161,18 +185,22 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
     {
         const int note = e.data[1] & 0x7f;
         const int velocity = e.data[2] & 0x7f;
+        int outNote = note, outVel = velocity;
 
-        if (! filter::inRange (note, params.keyLow.load(), params.keyHigh.load())
-            || ! filter::inRange (velocity, params.velLow.load(), params.velHigh.load()))
-            return;
+        if (! direct)
+        {
+            if (! filter::inRange (note, params.keyLow.load(), params.keyHigh.load())
+                || ! filter::inRange (velocity, params.velLow.load(), params.velHigh.load()))
+                return;
 
-        const int outNote = filter::transposeNote (note, params.transpose.load());
-        if (outNote < 0)
-            return;
+            outNote = filter::transposeNote (note, params.transpose.load());
+            if (outNote < 0)
+                return;
 
-        const int outVel = filter::applyVelocityCurve (velocity,
-                                                       (filter::VelocityCurve) params.velocityCurve.load(),
-                                                       params.fixedVelocity.load());
+            outVel = filter::applyVelocityCurve (velocity,
+                                                 (filter::VelocityCurve) params.velocityCurve.load(),
+                                                 params.fixedVelocity.load());
+        }
 
         // Same key struck again while the old instance still rings: release it there first.
         if (owner[ch][note] == ownerTail)
@@ -195,6 +223,8 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
         owner[ch][note] = ownerCurrent;
         sentNote[ch][note] = (uint8_t) outNote;
         activity.fetch_add (1, std::memory_order_relaxed);
+        if (! direct)
+            record (on, 3, pos);
         return;
     }
 
@@ -213,6 +243,8 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
                     o = none;
             }
             sendToCurrent (e.data, 3, pos);
+            if (! direct && cc != 0 && cc != 32)
+                record (e.data, 3, pos);
             break;
         }
 
@@ -231,10 +263,11 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
         case 0xe0: // pitch bend: also bend notes that are still ringing on the tail
             sendToCurrent (e.data, 3, pos);
             sendToTail (e.data, 3, pos);
+            if (! direct) record (e.data, 3, pos);
             break;
 
-        case 0xa0: sendToCurrent (e.data, 3, pos); break; // poly aftertouch
-        case 0xd0: sendToCurrent (e.data, 2, pos); break; // channel pressure
+        case 0xa0: sendToCurrent (e.data, 3, pos); if (! direct) record (e.data, 3, pos); break; // poly aftertouch
+        case 0xd0: sendToCurrent (e.data, 2, pos); if (! direct) record (e.data, 2, pos); break; // channel pressure
         default: break;
     }
 }

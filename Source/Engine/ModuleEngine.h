@@ -2,6 +2,7 @@
 
 #include "Engine/Effects.h"
 #include "Engine/Part.h"
+#include "Engine/Sequencer.h"
 #include "Midi/MidiEvent.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -30,6 +31,7 @@ public:
     /** MIDI channel whose Program Change selects a performance (0 = off). */
     std::atomic<int> controlChannel { 16 };
 
+    Sequencer sequencer;                   ///< transport, song playback, recording tap, metronome
     ReleaseQueue releaseQueue;             ///< audio -> message: instruments handed back
     ProgramRequestQueue programRequests;   ///< audio -> message: Program Change decisions
 
@@ -70,8 +72,8 @@ private:
     DelayFx delay;
     MasterFx masterFx;
 
-    std::vector<MidiEvent> liveEvents;
-    std::vector<int> livePositions;
+    std::vector<MidiEvent> liveEvents, seqEvents;
+    std::vector<int> livePositions, seqPositions;
 
     double sampleRate = 48000.0;
     int maxBlock = 512;

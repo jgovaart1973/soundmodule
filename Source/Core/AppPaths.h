@@ -12,6 +12,8 @@ juce::File localDataDir();      ///< %LOCALAPPDATA%\KlankModule (logs, crash rep
 juce::File userDir();           ///< Documents\KlankModule
 juce::File performancesDir();   ///< Documents\KlankModule\Performances
 juce::File soundsDir();         ///< Documents\KlankModule\Sounds
+juce::File songsDir();          ///< Documents\KlankModule\Songs
+juce::File songAutosaveFile();
 
 juce::File autosaveFile();
 juce::File settingsFile();

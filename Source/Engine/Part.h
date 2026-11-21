@@ -9,6 +9,8 @@
 
 namespace km
 {
+class Sequencer;
+
 /** Realtime parameters of a part. Written by UI / MIDI-learn threads, read by the audio thread. */
 struct PartParams
 {
@@ -77,6 +79,9 @@ public:
                  int numSamples, bool anySoloActive) noexcept;
     void panic() noexcept;
 
+    /** Sequencer that records what this part receives from keyboards (set once by the engine). */
+    void setRecorder (Sequencer* s) noexcept { recorder = s; }
+
     //== metering (any thread) =================================================
     float getPeakAndReset() noexcept  { return peak.exchange (0.0f); }
     uint32_t getActivityCount() const noexcept { return activity.load (std::memory_order_relaxed); }
@@ -90,6 +95,9 @@ private:
     void releaseTail() noexcept;
     void sendToCurrent (const uint8_t* data, int size, int pos) noexcept;
     void sendToTail (const uint8_t* data, int size, int pos) noexcept;
+    void record (const uint8_t* data, int size, int pos) noexcept;
+
+    Sequencer* recorder = nullptr;
 
     const int index;
     ReleaseQueue& releaseQueue;

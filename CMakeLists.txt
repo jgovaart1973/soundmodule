@@ -70,12 +70,15 @@ target_sources(km_core PRIVATE
     Source/Engine/Part.cpp
     Source/Engine/Effects.cpp
     Source/Engine/ModuleEngine.cpp
+    Source/Engine/Sequencer.cpp
     Source/Midi/MidiRouter.cpp
     Source/Midi/MidiLearn.cpp
     Source/Model/Performance.cpp
     Source/Model/ProgramMap.cpp
+    Source/Model/Song.cpp
     Source/Plugins/PluginScanner.cpp
     Source/App/AppController.cpp
+    Source/App/SongController.cpp
     Source/Render/OfflineRenderer.cpp
     Source/UI/KmLookAndFeel.cpp
     Source/UI/LearnableSlider.cpp
@@ -83,6 +86,7 @@ target_sources(km_core PRIVATE
     Source/UI/MasterPanel.cpp
     Source/UI/TopBar.cpp
     Source/UI/SettingsComponent.cpp
+    Source/UI/ArrangerComponent.cpp
     Source/UI/MainComponent.cpp)
 
 target_include_directories(km_core PUBLIC Source)
@@ -173,14 +177,33 @@ if(KM_BUILD_TESTS)
         GIT_SHALLOW    ON)
     FetchContent_MakeAvailable(Catch2)
 
+    # Tiny VST3 instrument so the tests can exercise real plug-in hosting and editors.
+    juce_add_plugin(KmTestSynth
+        PRODUCT_NAME "KmTestSynth"
+        COMPANY_NAME "KlankModule"
+        PLUGIN_MANUFACTURER_CODE Kmod
+        PLUGIN_CODE Kmts
+        IS_SYNTH TRUE
+        NEEDS_MIDI_INPUT TRUE
+        FORMATS VST3
+        COPY_PLUGIN_AFTER_BUILD FALSE)
+    target_sources(KmTestSynth PRIVATE Tests/TestPlugin/KmTestSynth.cpp)
+    target_compile_definitions(KmTestSynth PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+    target_link_libraries(KmTestSynth PRIVATE juce::juce_audio_processors juce::juce_recommended_config_flags)
+
     add_executable(km_tests
         Tests/TestPartFilter.cpp
         Tests/TestMidiQueue.cpp
         Tests/TestPerformanceJson.cpp
         Tests/TestProgramMap.cpp
         Tests/TestEngine.cpp
-        Tests/TestAppController.cpp)
+        Tests/TestAppController.cpp
+        Tests/TestSequencer.cpp
+        Tests/TestPluginHosting.cpp)
     target_link_libraries(km_tests PRIVATE km_core Catch2::Catch2WithMain)
+    add_dependencies(km_tests KmTestSynth_VST3)
+    target_compile_definitions(km_tests PRIVATE
+        KM_TEST_PLUGIN_PATH="$<GENEX_EVAL:$<TARGET_PROPERTY:KmTestSynth_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
 
     enable_testing() # not include(CTest): a dependency sets BUILD_TESTING=OFF
     include("${catch2_SOURCE_DIR}/extras/Catch.cmake")

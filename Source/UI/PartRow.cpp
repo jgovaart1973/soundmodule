@@ -107,7 +107,8 @@ PartRow::PartRow (AppController& c, int i)
     instrumentButton.onClick = [this] { showInstrumentMenu(); };
 
     addAndMakeVisible (editorButton);
-    editorButton.setTooltip ("Plug-in-venster openen");
+    editorButton.setTooltip ("Origineel plug-in-venster openen of naar voren halen om live te bewerken");
+    editorButton.setColour (juce::TextButton::buttonOnColourId, colours::accent);
     editorButton.onClick = [this] { if (onOpenEditor) onOpenEditor (index); };
 
     auto setupKnob = [this] (juce::Slider& s, double lo, double hi, double def, const juce::String& tip)
@@ -259,7 +260,10 @@ void PartRow::refreshFromModel()
                       : cfg.instrument.displayName.isNotEmpty() ? cfg.instrument.displayName
                       : (inst != nullptr ? inst->getName() : juce::String ("?"));
     instrumentButton.setButtonText (name);
-    editorButton.setEnabled (inst != nullptr && inst->hasEditor());
+    const bool canEdit = inst != nullptr && inst->hasEditor() && ! controller.isPartLoading (index);
+    editorButton.setEnabled (canEdit);
+    editorButton.setTooltip (canEdit ? "Origineel plug-in-venster openen of naar voren halen om live te bewerken"
+                                     : "Alleen VST3-plug-ins hebben een eigen venster");
 
     volume.setValue (params.volumeDb.load() < -59.9f ? -60.0 : params.volumeDb.load(), juce::dontSendNotification);
     pan.setValue (params.pan.load(), juce::dontSendNotification);
@@ -296,6 +300,7 @@ void PartRow::tick()
     sync (reverb, params.reverbSend.load());
     sync (delay, params.delaySend.load());
     muteButton.setToggleState (params.mute.load(), juce::dontSendNotification);
+    editorButton.setToggleState (isEditorOpen != nullptr && isEditorOpen (index), juce::dontSendNotification);
 
     for (auto* s : { &volume, &pan, &reverb, &delay })
         s->refreshLearnState();
@@ -335,7 +340,7 @@ void PartRow::showInstrumentMenu()
 
     menu.addSeparator();
     auto* inst = controller.getAssignedInstrument (index);
-    menu.addItem (4, "Plug-in-venster openen", inst != nullptr && inst->hasEditor());
+    menu.addItem (4, "Origineel plug-in-venster (live bewerken)", inst != nullptr && inst->hasEditor());
     menu.addItem (5, "Klank verwijderen", inst != nullptr);
 
     juce::Component::SafePointer<PartRow> safe (this);
@@ -349,6 +354,8 @@ void PartRow::showInstrumentMenu()
             if (result >= 1000 && result - 1000 < instruments.size())
             {
                 const auto& d = instruments.getReference (result - 1000);
+                if (self.onPluginChosen)
+                    self.onPluginChosen (self.index); // opens its window once it has loaded
                 self.controller.setPartInstrument (self.index, { InstrumentKey::Type::plugin, d.createIdentifierString(), d.name, {} });
                 if (! self.controller.getPerformance().parts[(size_t) self.index].enabled)
                     self.controller.setPartEnabled (self.index, true);

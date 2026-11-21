@@ -17,10 +17,12 @@ PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> i
         plugin->disableNonMainBuses();
 
     panicMidi.ensureSize (16 * 3 * 3);
+    plugin->addListener (this);
 }
 
 PluginInstrument::~PluginInstrument()
 {
+    plugin->removeListener (this);
     if (prepared)
         plugin->releaseResources();
 }

@@ -78,37 +78,41 @@ bool OfflineRenderer::loadPerformance (const Performance& p, juce::String& error
 
 juce::AudioBuffer<float> OfflineRenderer::render (const juce::MidiMessageSequence& seq, double tailSeconds)
 {
-    const double endTime = seq.getEndTime() + tailSeconds;
-    const int totalSamples = (int) std::ceil (endTime * sampleRate);
-    juce::AudioBuffer<float> result (2, juce::jmax (1, totalSamples));
+    std::vector<std::pair<int64_t, MidiEvent>> events;
+    for (int i = 0; i < seq.getNumEvents(); ++i)
+    {
+        const auto& msg = seq.getEventPointer (i)->message;
+        const auto* raw = msg.getRawData();
+        const int size = msg.getRawDataSize();
+        if (size >= 1 && size <= 3 && raw[0] >= 0x80 && raw[0] < 0xf0)
+            events.push_back ({ (int64_t) std::llround (msg.getTimeStamp() * sampleRate),
+                                MidiEvent::make (-1, raw[0], size > 1 ? raw[1] : 0, size > 2 ? raw[2] : 0, (uint8_t) size) });
+    }
+    return renderEvents (events, (int64_t) std::ceil ((seq.getEndTime() + tailSeconds) * sampleRate));
+}
+
+juce::AudioBuffer<float> OfflineRenderer::renderEvents (const std::vector<std::pair<int64_t, MidiEvent>>& all, int64_t total)
+{
+    const int totalSamples = (int) juce::jlimit<int64_t> (1, (int64_t) std::numeric_limits<int>::max(), total);
+    juce::AudioBuffer<float> result (2, totalSamples);
     result.clear();
 
     juce::AudioBuffer<float> block (2, blockSize);
     std::vector<MidiEvent> events (4096);
     std::vector<int> positions (4096);
-    int nextEvent = 0;
+    size_t next = 0;
 
     for (int start = 0; start < totalSamples; start += blockSize)
     {
         const int n = juce::jmin (blockSize, totalSamples - start);
         int count = 0;
 
-        while (nextEvent < seq.getNumEvents() && count < (int) events.size())
+        while (next < all.size() && all[next].first < start + n && count < (int) events.size())
         {
-            const auto& msg = seq.getEventPointer (nextEvent)->message;
-            const int samplePos = (int) std::llround (msg.getTimeStamp() * sampleRate);
-            if (samplePos >= start + n)
-                break;
-
-            const auto* raw = msg.getRawData();
-            const int size = msg.getRawDataSize();
-            if (size >= 1 && size <= 3 && raw[0] >= 0x80 && raw[0] < 0xf0)
-            {
-                events[(size_t) count] = MidiEvent::make (-1, raw[0], size > 1 ? raw[1] : 0, size > 2 ? raw[2] : 0, (uint8_t) size);
-                positions[(size_t) count] = juce::jmax (0, samplePos - start);
-                ++count;
-            }
-            ++nextEvent;
+            events[(size_t) count] = all[next].second;
+            positions[(size_t) count] = (int) juce::jmax<int64_t> (0, all[next].first - start);
+            ++count;
+            ++next;
         }
 
         juce::AudioBuffer<float> view (block.getArrayOfWritePointers(), 2, n);
@@ -120,6 +124,7 @@ juce::AudioBuffer<float> OfflineRenderer::render (const juce::MidiMessageSequenc
         while (auto r = engine.releaseQueue.pop())
             pool.release (*r);
         while (engine.programRequests.pop()) {}
+        while (engine.sequencer.recordQueue.pop()) {}
     }
     return result;
 }
@@ -176,14 +181,21 @@ juce::MidiMessageSequence OfflineRenderer::makeDemoSequence()
 
 bool OfflineRenderer::writeWav (const juce::AudioBuffer<float>& audio, double sr, const juce::File& file)
 {
+    return writeAudioFile (audio, sr, file, false);
+}
+
+bool OfflineRenderer::writeAudioFile (const juce::AudioBuffer<float>& audio, double sr, const juce::File& file, bool flac)
+{
     file.deleteFile();
     juce::WavAudioFormat wav;
+    juce::FlacAudioFormat flacFormat;
+    juce::AudioFormat& format = flac ? static_cast<juce::AudioFormat&> (flacFormat) : wav;
     std::unique_ptr<juce::OutputStream> stream (file.createOutputStream());
     if (stream == nullptr)
         return false;
 
     const auto options = juce::AudioFormatWriterOptions{}.withSampleRate (sr).withNumChannels (2).withBitsPerSample (24);
-    auto writer = wav.createWriterFor (stream, options); // takes ownership of the stream on success
+    auto writer = format.createWriterFor (stream, options); // takes ownership of the stream on success
     if (writer == nullptr)
         return false;
 

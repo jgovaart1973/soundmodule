@@ -22,11 +22,15 @@ public:
     /** Render the sequence (timestamps in seconds) plus a tail. */
     juce::AudioBuffer<float> render (const juce::MidiMessageSequence& sequence, double tailSeconds);
 
+    /** Render events at absolute sample positions (sorted), e.g. a song with targetPart set. */
+    juce::AudioBuffer<float> renderEvents (const std::vector<std::pair<int64_t, MidiEvent>>& events, int64_t totalSamples);
+
     ModuleEngine& getEngine() noexcept { return engine; }
 
     static juce::MidiMessageSequence loadMidiFile (const juce::File& file, juce::String& error);
     static juce::MidiMessageSequence makeDemoSequence();
     static bool writeWav (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::File& file);
+    static bool writeAudioFile (const juce::AudioBuffer<float>& audio, double sampleRate, const juce::File& file, bool flac);
 
 private:
     double sampleRate;

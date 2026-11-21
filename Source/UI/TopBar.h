@@ -18,6 +18,8 @@ public:
     std::function<void()> onSettings;
     std::function<void()> onSaveAs;
     std::function<void (float delta)> onZoom;
+    std::function<void (bool arranger)> onView;
+    void setView (bool arranger);
 
     void resized() override;
     void paint (juce::Graphics&) override;
@@ -33,7 +35,7 @@ private:
     AppController& controller;
     juce::TextButton prevButton { "<" }, nextButton { ">" }, newButton { "Nieuw" }, saveButton { "Opslaan" },
                      saveAsButton { "Opslaan als..." }, panicButton { "PANIC" }, settingsButton { "Instellingen" },
-                     zoomOut { "-" }, zoomIn { "+" };
+                     zoomOut { "-" }, zoomIn { "+" }, moduleView { "Module" }, arrangerView { "Arranger" };
     juce::ComboBox performanceBox;
     juce::Label dirtyLabel, cpuLabel;
     std::vector<DeviceLamp> deviceLamps;

@@ -1,8 +1,8 @@
 # KlankModule
 
 Een Windows x64-programma dat je pc verandert in een hoogwaardige **klankmodule voor MIDI-apparaten**.
-Sluit je keyboard aan, start de app en speel. Dit is **fase 1** uit het bouwplan: de klankmodule.
-Opnemen en arrangeren (GarageBand-niveau) volgen in fase 2.
+Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule) en **fase 2a**
+(opnemen en arrangeren). De pianorol om noten te bewerken volgt in fase 2b.
 
 ## Wat het nu kan (fase 1)
 
@@ -17,6 +17,31 @@ Opnemen en arrangeren (GarageBand-niveau) volgen in fase 2.
 | MIDI Learn | Rechtsklik op een schuif of knop > MIDI Learn. Ook voor volgende/vorige performance en Panic (voetschakelaar) |
 | Veiligheid | Panic-knop (Esc), automatisch herstel na audio-uitval, alle noten uit bij het loskoppelen van een keyboard, autosave elke 2 minuten, crashlog |
 | Plug-ins scannen | Elke plug-in wordt in een apart proces gescand: een crashende plug-in neemt de app niet mee |
+
+## Plug-ins live bewerken
+Elke part met een VST3-instrument heeft een knop **VST**. Die opent het originele venster van de plug-in,
+of haalt het naar voren als het al open is. Klik nog eens terwijl het voorop staat en het sluit.
+- Kies je een nieuwe plug-in in het klankmenu, dan opent het venster vanzelf zodra hij geladen is.
+- Alles wat je in het venster verandert hoor je direct; de performance krijgt de markering *gewijzigd*.
+- **Opslaan** bewaart de plug-in-instellingen in de performance (en in een nummer).
+- In de werkbalk van het venster zet je *Altijd bovenop* aan of uit. Het venster onthoudt zijn plek.
+
+## Opnemen en arrangeren (fase 2a)
+Schakel bovenin naar **Arranger** (F2). Terug naar de parts met **Module** (F1).
+
+| Wat | Hoe |
+| --- | --- |
+| Opnemen | Druk op ● of R. Zonder gekozen spoor krijgt elke ingeschakelde part een eigen spoor (een split neemt dus bas en piano apart op). Standaard eerst één maat aftellen |
+| Afspelen / stoppen | Spatiebalk, of ▶ en ■. Home = naar het begin |
+| Loop | Sleep over de liniaal om een loopbereik te kiezen. Klik op de liniaal om de afspeelkop te verplaatsen |
+| Takes | Neem op met loop aan: elke ronde wordt een take. De laatste speelt; rechtsklik op de clip > *Take kiezen* |
+| Achteraf vastleggen | Speel vrij (zonder opname) en klik **Vastleggen**: wat je net speelde komt als clip op de tijdlijn |
+| Clips | Slepen om te verplaatsen (op de tel), Delete om te verwijderen, Ctrl + muiswiel om te zoomen |
+| Tempo / maatsoort | In de transportbalk; metronoom aan/uit met **Metronoom** |
+| Bestanden | **Nummer...**: nieuw, openen, opslaan (`.kmsong`, inclusief de klanken), MIDI importeren, exporteren als MIDI of als audio (WAV of FLAC, 24 bit) |
+
+Een geïmporteerd MIDI-bestand krijgt per kanaal een spoor op de part met hetzelfde nummer.
+Parts zonder klank krijgen automatisch een passende ingebouwde klank.
 
 ## Bouwen op Windows
 
@@ -71,6 +96,9 @@ Program Change-nummers op het controlekanaal.
 | Toets | Actie |
 | --- | --- |
 | Esc | Panic: alle noten uit |
+| F1 / F2 | Module / Arranger |
+| Spatiebalk | Afspelen / stoppen |
+| R | Opnemen (in de Arranger) |
 | Page Up / Page Down | Vorige / volgende performance |
 | Ctrl+S | Opslaan |
 | Ctrl+ + / Ctrl+ - | Interface groter / kleiner |
@@ -79,6 +107,7 @@ Program Change-nummers op het controlekanaal.
 | Wat | Map |
 | --- | --- |
 | Performances | `Documenten\KlankModule\Performances` |
+| Nummers | `Documenten\KlankModule\Songs` |
 | Klankbibliotheken | `Documenten\KlankModule\Sounds` |
 | Instellingen, MIDI Learn, plug-inlijst, autosave | `%APPDATA%\KlankModule` |
 | Logboek en crashlog | `%LOCALAPPDATA%\KlankModule\logs` |
@@ -97,6 +126,8 @@ Zonder `--midi` speelt het een korte demo. Handig om klanken te vergelijken of f
 - MIDI loopt via de standaard Windows-MIDI-API. Op Windows 11 gaat dat automatisch via Windows MIDI
   Services (meerdere apps tegelijk op één keyboard). Echte MIDI 2.0-functies volgen in fase 3.
 - MIDI-uitgang naar hardware-synths, SysEx en MIDI-clock volgen in fase 3.
+- Noten bewerken (pianorol, quantize, velocity, controllers) volgt in fase 2b. Ongedaan maken ook.
+- Audiosporen (microfoon/gitaar opnemen) zitten nog niet in fase 2a; tempo is vast per nummer.
 - Niet-opgeslagen wijzigingen van een performance vervallen als je naar een andere performance wisselt
   (wel bewaard bij afsluiten via de autosave). Sla op voor je wisselt.
 

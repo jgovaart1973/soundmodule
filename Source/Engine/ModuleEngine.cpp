@@ -5,10 +5,15 @@ namespace km
 ModuleEngine::ModuleEngine (MidiEventQueue* liveInput) : liveQueue (liveInput)
 {
     for (int i = 0; i < kNumParts; ++i)
+    {
         parts[(size_t) i] = std::make_unique<Part> (i, releaseQueue, programRequests);
+        parts[(size_t) i]->setRecorder (&sequencer);
+    }
 
     liveEvents.resize (2048);
     livePositions.resize (2048);
+    seqEvents.resize (8192);
+    seqPositions.resize (8192);
     prepare (48000.0, 512);
 }
 
@@ -25,6 +30,7 @@ void ModuleEngine::prepare (double newSampleRate, int maxBlockSize)
     for (auto* b : { &mainBus, &reverbBus, &delayBus, &deviceScratch })
         b->setSize (2, maxBlock, false, true, false);
 
+    sequencer.prepare (sampleRate, maxBlock);
     reverb.prepare (sampleRate);
     delay.prepare (sampleRate);
     masterFx.prepare (sampleRate, maxBlock);
@@ -41,8 +47,12 @@ void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
     for (auto& p : parts)
         p->beginBlock();
 
+    // Song playback for this block (also handles play/stop/locate/loop).
+    const int numSeq = sequencer.generate (n, seqEvents.data(), seqPositions.data(), (int) seqEvents.size());
+
     if (panicRequested.exchange (false))
     {
+        sequencer.resetSounding();
         for (auto& p : parts)
             p->panic();
         reverb.reset();
@@ -68,6 +78,9 @@ void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
         for (auto& p : parts)
             p->handleEvent (ev, pos);
     }
+
+    for (int e = 0; e < numSeq; ++e)
+        getPart (seqEvents[(size_t) e].targetPart).handleEvent (seqEvents[(size_t) e], seqPositions[(size_t) e]);
 
     // Render parts into the buses
     juce::AudioBuffer<float> mainView (mainBus.getArrayOfWritePointers(), 2, n);
@@ -110,6 +123,7 @@ void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
         testToneRemaining.store (remaining - count, std::memory_order_relaxed);
     }
 
+    sequencer.renderClicks (mainView, n);
     masterFx.process (mainView, n, master.volumeDb.load(), master.limiterThresholdDb.load());
 
     const float peakNow = mainView.getMagnitude (0, n);
@@ -118,6 +132,7 @@ void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
 
     out.copyFrom (0, 0, mainView, 0, 0, n);
     out.copyFrom (1, 0, mainView, 1, 0, n);
+    sequencer.advance (n);
 }
 
 //==============================================================================

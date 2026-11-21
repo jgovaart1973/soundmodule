@@ -75,10 +75,12 @@ void AppController::initialise()
 
     // Audio
     engine.onAboutToStart = [this] (double sr, int bs) { pool.setAudioConfig (sr, bs); };
-    engine.onDeviceError = [this] (const juce::String& message)
+    // (WeakReference is created out here: MSVC rejects 'this' in a nested lambda's init-capture.)
+    const auto weakSelf = juce::WeakReference<AppController> (this);
+    engine.onDeviceError = [this, weakSelf] (const juce::String& message)
     {
         deviceErrorPending = true;
-        juce::MessageManager::callAsync ([weak = juce::WeakReference<AppController> (this), message]
+        juce::MessageManager::callAsync ([weak = weakSelf, message]
         {
             if (weak != nullptr)
                 weak->setStatus ("Audiofout: " + message + " (probeer opnieuw te starten...)");

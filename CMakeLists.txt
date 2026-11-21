@@ -9,6 +9,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+# Static MSVC runtime (/MT) for every target: sfizz forces it for itself, and mixing it with the
+# default /MD fails to link. Bonus: the .exe runs without installing the VC++ redistributable.
+cmake_policy(SET CMP0091 NEW)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------

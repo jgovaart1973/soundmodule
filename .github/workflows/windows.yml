@@ -1,0 +1,46 @@
+name: Windows x64 build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache downloaded dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure (Visual Studio 2022, x64)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Render test (demo phrase through the full engine)
+        run: build\KlankModuleRender_artefacts\Release\KlankModuleRender.exe --out demo.wav
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build\KlankModule_artefacts\Release\KlankModule.exe dist\
+          Copy-Item build\KlankModuleRender_artefacts\Release\KlankModuleRender.exe dist\
+          Copy-Item README.md, Scripts\download_sounds.ps1 dist\
+          Copy-Item demo.wav dist\
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KlankModule-windows-x64
+          path: dist

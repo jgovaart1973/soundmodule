@@ -86,6 +86,7 @@ target_sources(km_core PRIVATE
     Source/UI/MasterPanel.cpp
     Source/UI/TopBar.cpp
     Source/UI/SettingsComponent.cpp
+    Source/UI/PianoRoll.cpp
     Source/UI/ArrangerComponent.cpp
     Source/UI/MainComponent.cpp)
 
@@ -199,7 +200,8 @@ if(KM_BUILD_TESTS)
         Tests/TestEngine.cpp
         Tests/TestAppController.cpp
         Tests/TestSequencer.cpp
-        Tests/TestPluginHosting.cpp)
+        Tests/TestPluginHosting.cpp
+        Tests/TestEditing.cpp)
     target_link_libraries(km_tests PRIVATE km_core Catch2::Catch2WithMain)
     add_dependencies(km_tests KmTestSynth_VST3)
     target_compile_definitions(km_tests PRIVATE

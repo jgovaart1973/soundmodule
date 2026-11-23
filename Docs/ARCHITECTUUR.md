@@ -63,3 +63,13 @@ De audio-thread wacht nooit en alloceert niets:
 - Bij elke wijziging bouwt de `SongController` een nieuwe snapshot; de oude wordt pas vrijgegeven als de
   audio-thread hem heeft losgelaten.
 - `OfflineRenderer::renderEvents` exporteert een nummer naar WAV/FLAC via dezelfde engine.
+
+## Pianorol (fase 2b)
+- `Model/NoteEditing.h`: pure functies voor quantize (raster, sterkte, swing, lengtes), transponeren en
+  controllerlijnen tekenen/wissen. Volledig getest zonder interface.
+- `PianoRoll` werkt op een kopie van de clip en schrijft na elk afgerond gebaar terug via
+  `SongController::setClipNotes` / `setClipControls`. Dat is precies één stap voor ongedaan maken.
+- `SongController` bewaart vóór elke wijziging een kopie van het nummer (max. 100 stappen); snelle
+  herhalingen van hetzelfde (tempo slepen) worden samengevoegd.
+- Voorbeluisteren gaat via `AppController::previewNote`: een event met `targetPart` in de live-wachtrij,
+  dus nooit opgenomen.

@@ -28,8 +28,10 @@ public:
     explicit TransportBar (ArrangerComponent& o) : owner (o), song (o.song)
     {
         for (auto* b : { &toStart, &play, &stopButton, &recordButton, &loopButton, &clickButton, &countInButton,
-                         &captureButton, &addTrackButton, &songButton })
+                         &captureButton, &addTrackButton, &songButton, &undoButton, &redoButton })
             addAndMakeVisible (*b);
+        undoButton.onClick = [this] { song.undo(); };
+        redoButton.onClick = [this] { song.redo(); };
 
         toStart.setTooltip ("Naar het begin (Home)");
         play.setTooltip ("Afspelen / pauze (spatiebalk)");
@@ -107,6 +109,10 @@ public:
         loopButton.setToggleState (s.loopEnabled, juce::dontSendNotification);
         clickButton.setToggleState (song.isMetronomeOn(), juce::dontSendNotification);
         songName.setText (s.name + (song.isDirty() ? u8 ("  \xe2\x97\x8f") : juce::String()), juce::dontSendNotification);
+        undoButton.setEnabled (song.canUndo());
+        redoButton.setEnabled (song.canRedo());
+        undoButton.setTooltip (song.canUndo() ? "Ongedaan maken: " + song.getUndoDescription() + " (Ctrl+Z)" : juce::String ("Niets om ongedaan te maken"));
+        redoButton.setTooltip (song.canRedo() ? "Opnieuw: " + song.getRedoDescription() + " (Ctrl+Y)" : juce::String ("Niets om opnieuw te doen"));
     }
 
     void tick()
@@ -141,6 +147,9 @@ public:
         r.removeFromLeft (8);
         place (captureButton, 110);
         place (addTrackButton, 86);
+        r.removeFromLeft (8);
+        place (undoButton, 40);
+        place (redoButton, 40);
         songButton.setBounds (r.removeFromRight (110));
         r.removeFromRight (8);
         songName.setBounds (r);
@@ -159,7 +168,7 @@ private:
     juce::TextButton toStart { u8 ("|\xe2\x97\x80") }, play { u8 ("\xe2\x96\xb6") }, stopButton { u8 ("\xe2\x96\xa0") },
                      recordButton { u8 ("\xe2\x97\x8f") }, loopButton { "Loop" }, clickButton { "Metronoom" },
                      countInButton { "Aftellen" }, captureButton { "Vastleggen" }, addTrackButton { "+ Spoor" },
-                     songButton { "Nummer..." };
+                     songButton { "Nummer..." }, undoButton { u8 ("\xe2\x86\xb6") }, redoButton { u8 ("\xe2\x86\xb7") };
     juce::Slider tempo;
     juce::ComboBox metre;
     juce::Label position, songName;
@@ -531,6 +540,8 @@ public:
                                                + " (" + juce::String ((int) other.notes.size()) + " noten)",
                                   true, ! other.muted);
         }
+        m.addItem (3, "Bewerken in pianorol (dubbelklik)");
+        m.addItem (4, "Dupliceren");
         m.addSubMenu ("Take kiezen", takeMenu);
         m.addSeparator();
         m.addItem (2, "Clip verwijderen");
@@ -540,8 +551,29 @@ public:
         {
             if (safe == nullptr) return;
             if (r >= 100) safe->owner.song.useTake (t, r - 100);
+            if (r == 3) safe->owner.openEditor (t, c);
+            if (r == 4) safe->owner.selectedClip = safe->owner.song.duplicateClip (t, c);
             if (r == 2) { safe->owner.song.deleteClip (t, c); safe->owner.selectedClip = -1; }
         });
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        int t = -1, c = -1;
+        if (hitClip (e.getPosition(), t, c))
+        {
+            owner.openEditor (t, c);
+            return;
+        }
+        // Empty spot on a track: a new one-bar clip, opened straight away.
+        if (juce::isPositiveAndBelow (t, (int) owner.song.getSong().tracks.size()))
+        {
+            const double bar = juce::jmax (0.25, owner.song.getSong().beatsPerBarAsQuarters());
+            const double start = std::floor (juce::jmax (0.0, owner.xToBeat (e.x)) / bar) * bar;
+            const int created = owner.song.createClip (t, start, bar);
+            if (created >= 0)
+                owner.openEditor (t, created);
+        }
     }
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
@@ -594,8 +626,26 @@ ArrangerComponent::ArrangerComponent (AppController& c)
     hScroll.addListener (this);
     hScroll.setAutoHide (false);
 
+    pianoRoll = std::make_unique<PianoRoll> (controller, song);
+    addChildComponent (*pianoRoll);
+    pianoRoll->onClose = [this]
+    {
+        pianoRoll->setVisible (false);
+        resized();
+        grabKeyboardFocus();
+    };
+
     rebuildHeaders();
     startTimerHz (30);
+}
+
+void ArrangerComponent::openEditor (int track, int clip)
+{
+    selectedTrack = track;
+    selectedClip = clip;
+    pianoRoll->setVisible (true);
+    resized();
+    pianoRoll->open (track, clip);
 }
 
 ArrangerComponent::~ArrangerComponent()
@@ -614,6 +664,8 @@ void ArrangerComponent::refresh()
     if (! juce::isPositiveAndBelow (selectedTrack, (int) song.getSong().tracks.size()))
         selectedTrack = -1;
     transport->refresh();
+    if (pianoRoll->isVisible())
+        pianoRoll->reloadFromSong();
     updateScrollRange();
     resized();
     repaint();
@@ -672,6 +724,8 @@ void ArrangerComponent::resized()
 {
     auto r = getLocalBounds();
     transport->setBounds (r.removeFromTop (54));
+    if (pianoRoll->isVisible())
+        pianoRoll->setBounds (r.removeFromBottom (juce::jmax (330, (int) (r.getHeight() * 0.55f))));
     hScroll.setBounds (r.removeFromBottom (14).withTrimmedLeft (headerWidth));
     ruler->setBounds (r.removeFromTop (rulerHeight).withTrimmedLeft (headerWidth));
     bodyViewport.setBounds (r);
@@ -697,6 +751,18 @@ bool ArrangerComponent::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress::spaceKey)              { song.togglePlay(); return true; }
     if (key == juce::KeyPress ('r', 0, 'r') || key == juce::KeyPress ('R', 0, 'R')) { song.record(); return true; }
     if (key == juce::KeyPress::homeKey)               { song.goToStart(); return true; }
+    if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z'))
+    {
+        key.getModifiers().isShiftDown() ? song.redo() : song.undo();
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'Y' || key.getKeyCode() == 'y')) { song.redo(); return true; }
+    if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'D' || key.getKeyCode() == 'd') && selectedClip >= 0)
+    {
+        selectedClip = song.duplicateClip (selectedTrack, selectedClip);
+        return true;
+    }
+    if (key == juce::KeyPress::returnKey && selectedClip >= 0) { openEditor (selectedTrack, selectedClip); return true; }
     if ((key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) && selectedClip >= 0)
     {
         song.deleteClip (selectedTrack, selectedClip);

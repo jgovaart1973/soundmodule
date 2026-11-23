@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/AppController.h"
+#include "UI/PianoRoll.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -22,6 +23,9 @@ public:
 
     /** Rebuild after the song changed (tracks added, recording stored...). */
     void refresh();
+
+    /** Open the piano roll for a clip. */
+    void openEditor (int track, int clip);
 
 private:
     class TransportBar;
@@ -52,6 +56,7 @@ private:
     juce::Component body;
     juce::OwnedArray<TrackHeader> headers;
     juce::ScrollBar hScroll { false };
+    std::unique_ptr<PianoRoll> pianoRoll;
 
     double pixelsPerBeat = 24.0;
     double scrollBeat = 0.0;

@@ -71,6 +71,9 @@ public:
     void panic();
     void playTestTone() { engine.startTestTone(); }
 
+    /** Play a note on a part for a moment (piano roll preview). */
+    void previewNote (int part, int note, int velocity = 100, int channel = 1, int durationMs = 350);
+
     juce::AudioDeviceManager& getDeviceManager() noexcept { return deviceManager; }
     MidiRouter& getMidiRouter() noexcept                  { return router; }
     MidiLearn& getMidiLearn() noexcept                    { return learn; }

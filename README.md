@@ -1,8 +1,8 @@
 # KlankModule
 
 Een Windows x64-programma dat je pc verandert in een hoogwaardige **klankmodule voor MIDI-apparaten**.
-Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule) en **fase 2a**
-(opnemen en arrangeren). De pianorol om noten te bewerken volgt in fase 2b.
+Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule), **fase 2a**
+(opnemen en arrangeren) en **fase 2b** (noten bewerken in de pianorol, ongedaan maken).
 
 ## Wat het nu kan (fase 1)
 
@@ -39,6 +39,26 @@ Schakel bovenin naar **Arranger** (F2). Terug naar de parts met **Module** (F1).
 | Clips | Slepen om te verplaatsen (op de tel), Delete om te verwijderen, Ctrl + muiswiel om te zoomen |
 | Tempo / maatsoort | In de transportbalk; metronoom aan/uit met **Metronoom** |
 | Bestanden | **Nummer...**: nieuw, openen, opslaan (`.kmsong`, inclusief de klanken), MIDI importeren, exporteren als MIDI of als audio (WAV of FLAC, 24 bit) |
+
+## Noten bewerken: de pianorol (fase 2b)
+Dubbelklik op een clip (of kies *Bewerken in pianorol*). Dubbelklik op een leeg stuk van een spoor
+maakt een nieuwe clip van één maat en opent die.
+
+| Wat | Hoe |
+| --- | --- |
+| Noot toevoegen / verwijderen | Dubbelklik op een lege plek / op een noot |
+| Selecteren | Klik; Shift+klik voegt toe; sleep over een lege plek voor een rechthoek; Ctrl+A = alles |
+| Verplaatsen / verlengen | Sleep een noot (tijd en toonhoogte); sleep de rechterrand om te verlengen. Pijltjes ←/→ schuiven één rasterstap |
+| Transponeren | ↑/↓ (Shift = octaaf) of de knoppen -12, -1, +1, +12 |
+| Raster | 1/4 tot 1/32 en triolen; *Raster* uit = vrij plaatsen |
+| Quantize | Knop of Q. *Sterkte* (hoe ver naar het raster), *Swing* (100% = triool-gevoel), *Ook lengtes*. Werkt op de selectie, of op alles als niets gekozen is |
+| Velocity | Sleep in de baan onder de noten (met selectie: alleen gekozen noten) |
+| Controllers | Kies rechtsboven de baan (Modulatie, Expressie, Volume, Sustain, Pitch bend, Aftertouch) en teken met de muis; rechtermuisknop wist |
+| Beluisteren | Klik op een noot of op het toetsenbord links |
+| Zoomen / scrollen | Ctrl + muiswiel / muiswiel (Shift = horizontaal) |
+| Ongedaan maken | Ctrl+Z, opnieuw Ctrl+Y (of de pijlen in de transportbalk). Werkt voor alles in het nummer, ook opnames |
+
+In de Arranger dupliceert Ctrl+D de gekozen clip; Enter opent hem in de pianorol.
 
 Een geïmporteerd MIDI-bestand krijgt per kanaal een spoor op de part met hetzelfde nummer.
 Parts zonder klank krijgen automatisch een passende ingebouwde klank.
@@ -99,6 +119,8 @@ Program Change-nummers op het controlekanaal.
 | F1 / F2 | Module / Arranger |
 | Spatiebalk | Afspelen / stoppen |
 | R | Opnemen (in de Arranger) |
+| Ctrl+Z / Ctrl+Y | Ongedaan maken / opnieuw (nummer) |
+| Q | Quantize (in de pianorol) |
 | Page Up / Page Down | Vorige / volgende performance |
 | Ctrl+S | Opslaan |
 | Ctrl+ + / Ctrl+ - | Interface groter / kleiner |
@@ -126,7 +148,6 @@ Zonder `--midi` speelt het een korte demo. Handig om klanken te vergelijken of f
 - MIDI loopt via de standaard Windows-MIDI-API. Op Windows 11 gaat dat automatisch via Windows MIDI
   Services (meerdere apps tegelijk op één keyboard). Echte MIDI 2.0-functies volgen in fase 3.
 - MIDI-uitgang naar hardware-synths, SysEx en MIDI-clock volgen in fase 3.
-- Noten bewerken (pianorol, quantize, velocity, controllers) volgt in fase 2b. Ongedaan maken ook.
 - Audiosporen (microfoon/gitaar opnemen) zitten nog niet in fase 2a; tempo is vast per nummer.
 - Niet-opgeslagen wijzigingen van een performance vervallen als je naar een andere performance wisselt
   (wel bewaard bij afsluiten via de autosave). Sla op voor je wisselt.

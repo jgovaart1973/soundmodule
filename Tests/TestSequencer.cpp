@@ -386,3 +386,82 @@ TEST_CASE ("Audio export renders the song to a file", "[export]")
     REQUIRE (f.song().loadSong (songFile));
     REQUIRE (f.song().getSong().tracks.size() == 2);
 }
+
+//==============================================================================
+TEST_CASE ("Clip edits can be undone and redone", "[undo]")
+{
+    Fixture f;
+    auto& s = f.song();
+    const int track = s.addTrack (0);
+    const int clip = s.createClip (track, 0.0, 4.0);
+    REQUIRE (clip == 0);
+
+    s.setClipNotes (track, clip, { { 0.27, 0.5, 60, 100, 1 }, { 1.1, 0.5, 64, 100, 1 } }, "Noten tekenen");
+    s.quantizeClip (track, clip, { 0.25, 1.0, 0.0, false }, {});
+    REQUIRE_THAT (s.getClip (track, clip)->notes[0].start, WithinAbs (0.25, 1e-9));
+    REQUIRE (s.getUndoDescription() == "Quantize");
+
+    REQUIRE (s.undo());
+    REQUIRE_THAT (s.getClip (track, clip)->notes[0].start, WithinAbs (0.27, 1e-9));
+    REQUIRE (s.redo());
+    REQUIRE_THAT (s.getClip (track, clip)->notes[0].start, WithinAbs (0.25, 1e-9));
+
+    REQUIRE (s.undo());                     // quantize
+    REQUIRE (s.undo());                     // notes
+    REQUIRE (s.getClip (track, clip)->notes.empty());
+    REQUIRE (s.undo());                     // new clip
+    REQUIRE (s.getClip (track, clip) == nullptr);
+    REQUIRE (s.undo());                     // new track
+    REQUIRE (s.getSong().tracks.empty());
+    REQUIRE_FALSE (s.undo());
+    REQUIRE (s.canRedo());
+}
+
+TEST_CASE ("Dragging the tempo is one undo step, a new edit clears redo", "[undo]")
+{
+    Fixture f;
+    auto& s = f.song();
+    for (int bpm = 121; bpm <= 140; ++bpm)
+        s.setBpm (bpm);
+    REQUIRE (s.getSong().bpm == 140.0);
+    REQUIRE (s.undo());
+    REQUIRE (s.getSong().bpm == 120.0);
+    REQUIRE_FALSE (s.canUndo());
+
+    REQUIRE (s.canRedo());
+    s.addTrack (0);
+    REQUIRE_FALSE (s.canRedo());
+}
+
+TEST_CASE ("A recording can be undone", "[undo]")
+{
+    Fixture f;
+    f.song().setCountIn (false);
+    f.song().record();
+    f.drive.run (1.0, { { 0.2, on (60) }, { 0.5, off (60) } });
+    f.song().stop();
+    f.drive.run (0.1);
+    REQUIRE (f.song().getSong().tracks.at (0).clips.size() == 1);
+    REQUIRE (f.song().getUndoDescription() == "Opname");
+    REQUIRE (f.song().undo());
+    REQUIRE (f.song().getSong().tracks.at (0).clips.empty());
+}
+
+TEST_CASE ("Notes drawn in the piano roll play back; duplicating repeats them", "[undo]")
+{
+    Fixture f;
+    auto& s = f.song();
+    const int track = s.addTrack (0);
+    const int clip = s.createClip (track, 0.0, 4.0);
+    s.setClipNotes (track, clip, { { 0.0, 1.0, 60, 100, 1 } }, "Noten tekenen");
+    const int copy = s.duplicateClip (track, clip);
+    REQUIRE (s.getClip (track, copy)->start == 4.0);
+
+    s.locate (4.0);
+    s.play();
+    REQUIRE (f.drive.run (0.3) > 0.01f);   // the duplicate's note at bar 2
+
+    // A note longer than the clip makes the clip longer.
+    s.setClipNotes (track, clip, { { 3.0, 3.0, 60, 100, 1 } }, "Noot verlengen");
+    REQUIRE (s.getClip (track, clip)->length == 8.0);
+}

@@ -117,12 +117,14 @@ void SongController::record()
 
 void SongController::setBpm (double bpm)
 {
+    pushUndo ("Tempo");
     song.bpm = juce::jlimit (20.0, 400.0, bpm);
     changed();
 }
 
 void SongController::setTimeSignature (int beatsPerBar, int beatUnit)
 {
+    pushUndo ("Maatsoort");
     song.beatsPerBar = juce::jlimit (1, 16, beatsPerBar);
     song.beatUnit = juce::jlimit (1, 16, beatUnit);
     changed();
@@ -130,6 +132,7 @@ void SongController::setTimeSignature (int beatsPerBar, int beatUnit)
 
 void SongController::setLoop (bool enabled, double start, double end)
 {
+    pushUndo ("Loop");
     song.loopEnabled = enabled;
     song.loopStart = juce::jmax (0.0, juce::jmin (start, end));
     song.loopEnd = juce::jmax (song.loopStart + 1.0, juce::jmax (start, end));
@@ -144,6 +147,7 @@ void SongController::setMetronome (bool on)
 //==============================================================================
 int SongController::addTrack (int part)
 {
+    pushUndo ("Spoor toevoegen");
     Track t;
     t.part = juce::jlimit (0, kNumParts - 1, part);
     const auto& key = app.getPerformance().parts[(size_t) t.part].instrument;
@@ -157,6 +161,7 @@ void SongController::removeTrack (int track)
 {
     if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()) || takesOpen)
         return;
+    pushUndo ("Spoor verwijderen");
     song.tracks.erase (song.tracks.begin() + track);
     changed();
 }
@@ -165,6 +170,7 @@ void SongController::setTrackPart (int track, int part)
 {
     if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
     {
+        pushUndo ("Part van spoor");
         song.tracks[(size_t) track].part = juce::jlimit (0, kNumParts - 1, part);
         changed();
     }
@@ -174,6 +180,7 @@ void SongController::setTrackName (int track, const juce::String& name)
 {
     if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
     {
+        pushUndo ("Spoornaam");
         song.tracks[(size_t) track].name = name;
         changed();
     }
@@ -183,6 +190,7 @@ void SongController::setTrackMute (int track, bool on)
 {
     if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
     {
+        pushUndo ("Mute");
         song.tracks[(size_t) track].mute = on;
         changed();
     }
@@ -192,6 +200,7 @@ void SongController::setTrackSolo (int track, bool on)
 {
     if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
     {
+        pushUndo ("Solo");
         song.tracks[(size_t) track].solo = on;
         changed();
     }
@@ -213,6 +222,7 @@ void SongController::deleteClip (int track, int clip)
     auto& clips = song.tracks[(size_t) track].clips;
     if (juce::isPositiveAndBelow (clip, (int) clips.size()))
     {
+        pushUndo ("Clip verwijderen");
         clips.erase (clips.begin() + clip);
         changed();
     }
@@ -225,6 +235,7 @@ void SongController::moveClip (int track, int clip, double newStart)
     auto& clips = song.tracks[(size_t) track].clips;
     if (juce::isPositiveAndBelow (clip, (int) clips.size()))
     {
+        pushUndo ("Clip verplaatsen");
         clips[(size_t) clip].start = juce::jmax (0.0, newStart);
         changed();
     }
@@ -238,6 +249,7 @@ void SongController::useTake (int track, int clip)
     if (! juce::isPositiveAndBelow (clip, (int) clips.size()))
         return;
 
+    pushUndo ("Take kiezen");
     const auto chosen = clips[(size_t) clip];
     for (size_t i = 0; i < clips.size(); ++i)
     {
@@ -248,6 +260,140 @@ void SongController::useTake (int track, int clip)
             c.muted = true;
     }
     changed();
+}
+
+//==============================================================================
+void SongController::pushUndo (const juce::String& what)
+{
+    const auto now = juce::Time::getMillisecondCounter();
+    const bool merge = what == lastUndoWhat && now - lastUndoTime < 1500 && ! undoStack.empty()
+                       && (what == "Tempo" || what == "Loop");
+    lastUndoWhat = what;
+    lastUndoTime = now;
+    redoStack.clear();
+    if (merge)
+        return;
+
+    undoStack.push_back ({ song, what });
+    if (undoStack.size() > maxUndo)
+        undoStack.erase (undoStack.begin());
+}
+
+bool SongController::undo()
+{
+    if (undoStack.empty() || takesOpen)
+        return false;
+    redoStack.push_back ({ song, undoStack.back().what });
+    const auto what = undoStack.back().what;
+    song = std::move (undoStack.back().song);
+    undoStack.pop_back();
+    lastUndoWhat.clear();
+    changed();
+    setStatus ("Ongedaan gemaakt: " + what);
+    return true;
+}
+
+bool SongController::redo()
+{
+    if (redoStack.empty() || takesOpen)
+        return false;
+    undoStack.push_back ({ song, redoStack.back().what });
+    const auto what = redoStack.back().what;
+    song = std::move (redoStack.back().song);
+    redoStack.pop_back();
+    lastUndoWhat.clear();
+    changed();
+    setStatus ("Opnieuw: " + what);
+    return true;
+}
+
+Clip* SongController::clipAt (int track, int clip)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+        return nullptr;
+    auto& clips = song.tracks[(size_t) track].clips;
+    return juce::isPositiveAndBelow (clip, (int) clips.size()) ? &clips[(size_t) clip] : nullptr;
+}
+
+const Clip* SongController::getClip (int track, int clip) const
+{
+    return const_cast<SongController*> (this)->clipAt (track, clip);
+}
+
+int SongController::createClip (int track, double start, double length)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+        return -1;
+    pushUndo ("Nieuwe clip");
+    Clip c;
+    c.name = "Clip";
+    c.start = juce::jmax (0.0, start);
+    c.length = juce::jmax (0.25, length);
+    auto& clips = song.tracks[(size_t) track].clips;
+    clips.push_back (c);
+    changed();
+    return (int) clips.size() - 1;
+}
+
+int SongController::duplicateClip (int track, int clip)
+{
+    auto* c = clipAt (track, clip);
+    if (c == nullptr)
+        return -1;
+    pushUndo ("Clip dupliceren");
+    Clip copy = *c;
+    copy.start = c->end();
+    copy.muted = false;
+    auto& clips = song.tracks[(size_t) track].clips;
+    clips.push_back (copy);
+    changed();
+    return (int) clips.size() - 1;
+}
+
+void SongController::setClipLength (int track, int clip, double length)
+{
+    if (auto* c = clipAt (track, clip))
+    {
+        pushUndo ("Cliplengte");
+        c->length = juce::jmax (0.25, length);
+        changed();
+    }
+}
+
+void SongController::setClipNotes (int track, int clip, const std::vector<SongNote>& notes, const juce::String& what)
+{
+    if (auto* c = clipAt (track, clip))
+    {
+        pushUndo (what);
+        c->notes = notes;
+        // Notes past the end make the clip longer (to the next bar), never shorter.
+        double end = 0.0;
+        for (auto& n : notes)
+            end = juce::jmax (end, n.start + n.length);
+        if (end > c->length)
+            c->length = std::ceil (end / barLength (song) - 1.0e-6) * barLength (song);
+        changed();
+    }
+}
+
+void SongController::setClipControls (int track, int clip, const std::vector<SongControl>& controls, const juce::String& what)
+{
+    if (auto* c = clipAt (track, clip))
+    {
+        pushUndo (what);
+        c->controls = controls;
+        changed();
+    }
+}
+
+void SongController::quantizeClip (int track, int clip, const edit::QuantizeSettings& settings, const std::set<int>& selection)
+{
+    if (auto* c = clipAt (track, clip))
+    {
+        auto notes = c->notes;
+        edit::quantize (notes, selection, settings);
+        setClipNotes (track, clip, notes, "Quantize");
+    }
 }
 
 //==============================================================================
@@ -321,6 +467,8 @@ void SongController::commitTakes (double endBeat, bool loopTake)
         clip.length = loopTake ? juce::jmax (1.0, endBeat - clip.start)
                                : juce::jmax (barLength (song), ceilToBar (song, endBeat) - clip.start);
 
+        if (! added)
+            pushUndo ("Opname");
         auto& clips = song.tracks[(size_t) take.track].clips;
         // Older material in the same range becomes an (inaudible) earlier take.
         for (auto& other : clips)
@@ -431,6 +579,7 @@ bool SongController::captureRecentPlaying()
     if (first >= history.size())
         return false;
 
+    pushUndo ("Vastleggen");
     const int64_t t0 = history[first].sampleTime;
     const double beatsPerSample = song.bpm / 60.0 / sr;
     const double start = floorToBar (song, sequencer.isRolling() ? song.getEndBeat() : sequencer.getPosition());
@@ -480,6 +629,8 @@ void SongController::newSong()
     sequencer.locate (0.0);
     song = Song();
     songFile = juce::File();
+    undoStack.clear();
+    redoStack.clear();
     changed (false);
     dirty = false;
 }
@@ -521,6 +672,8 @@ bool SongController::loadSong (const juce::File& file)
     sequencer.locate (0.0);
     song = std::move (loaded);
     songFile = file;
+    undoStack.clear();
+    redoStack.clear();
     app.applyPerformanceFromSong (song.performance); // the song brings its own sounds
     changed (false);
     dirty = false;
@@ -585,6 +738,7 @@ int SongController::importMidi (const juce::File& file, juce::String& error)
         return 0;
     }
 
+    pushUndo ("MIDI importeren");
     const size_t before = song.tracks.size();
     const int added = song.importMidiFile (midi);
 

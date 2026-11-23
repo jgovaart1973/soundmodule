@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Sequencer.h"
+#include "Model/NoteEditing.h"
 #include "Model/Song.h"
 
 #include <deque>
@@ -54,6 +55,23 @@ public:
     void moveClip (int track, int clip, double newStart);
     void useTake (int track, int clip);   ///< unmute this take, mute overlapping ones
 
+    //== clip contents (piano roll) ============================================
+    int createClip (int track, double start, double length);     ///< empty clip; @returns its index
+    int duplicateClip (int track, int clip);                      ///< copy placed right after it
+    void setClipLength (int track, int clip, double length);
+    void setClipNotes (int track, int clip, const std::vector<SongNote>& notes, const juce::String& what);
+    void setClipControls (int track, int clip, const std::vector<SongControl>& controls, const juce::String& what);
+    void quantizeClip (int track, int clip, const edit::QuantizeSettings& settings, const std::set<int>& selection);
+    const Clip* getClip (int track, int clip) const;
+
+    //== undo ==================================================================
+    bool canUndo() const noexcept { return ! undoStack.empty(); }
+    bool canRedo() const noexcept { return ! redoStack.empty(); }
+    juce::String getUndoDescription() const { return undoStack.empty() ? juce::String() : undoStack.back().what; }
+    juce::String getRedoDescription() const { return redoStack.empty() ? juce::String() : redoStack.back().what; }
+    bool undo();
+    bool redo();
+
     /** Retrospective record: turn the last thing you played (even with the transport stopped)
         into clips at the playhead. @returns false if nothing was played recently. */
     bool captureRecentPlaying();
@@ -92,6 +110,10 @@ private:
     };
 
     void changed (bool markDirty = true);
+    /** Call before every edit: remembers the song for undo. Quick repeats of the same edit
+        (dragging the tempo) are merged into one undo step. */
+    void pushUndo (const juce::String& what);
+    Clip* clipAt (int track, int clip);
     void syncTransport();
     void openTakes (double startBeat, int takeNumber);
     void commitTakes (double endBeat, bool loopTake);
@@ -112,6 +134,16 @@ private:
     bool takesOpen = false;
     int sessionPass = 0, takeNumber = 1;
     double recordStart = 0.0;
+
+    struct UndoEntry
+    {
+        Song song;
+        juce::String what;
+    };
+    std::vector<UndoEntry> undoStack, redoStack;
+    juce::String lastUndoWhat;
+    juce::uint32 lastUndoTime = 0;
+    static constexpr size_t maxUndo = 100;
 
     // Retrospective history (everything the parts received from keyboards)
     std::deque<RecordedEvent> history;

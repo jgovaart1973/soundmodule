@@ -701,6 +701,24 @@ void AppController::panic()
     setStatus ("Panic: alle noten uit.");
 }
 
+void AppController::previewNote (int part, int note, int velocity, int channel, int durationMs)
+{
+    const auto ch = (uint8_t) (juce::jlimit (1, 16, channel) - 1);
+    auto on = MidiEvent::make (-1, (uint8_t) (0x90 | ch), (uint8_t) juce::jlimit (0, 127, note), (uint8_t) juce::jlimit (1, 127, velocity));
+    on.targetPart = (int8_t) juce::jlimit (0, kNumParts - 1, part);
+    midiQueue.push (on);
+
+    auto off = on;
+    off.data[0] = (uint8_t) (0x80 | ch);
+    off.data[2] = 0;
+    juce::WeakReference<AppController> weak (this);
+    juce::Timer::callAfterDelay (durationMs, [weak, off]
+    {
+        if (weak != nullptr)
+            weak->midiQueue.push (off);
+    });
+}
+
 void AppController::setControlChannel (int channel)
 {
     engine.controlChannel = juce::jlimit (0, 16, channel);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/AudioCache.h"
 #include "Engine/InstrumentPool.h"
 #include "Engine/ModuleEngine.h"
 #include "Model/Performance.h"
@@ -21,6 +22,9 @@ public:
 
     /** Render the sequence (timestamps in seconds) plus a tail. */
     juce::AudioBuffer<float> render (const juce::MidiMessageSequence& sequence, double tailSeconds);
+
+    /** Play a whole song (MIDI + audio tracks, tempo map) through the engine's sequencer. */
+    juce::AudioBuffer<float> renderSong (const Song& song, AudioCache& cache, double tailSeconds);
 
     /** Render events at absolute sample positions (sorted), e.g. a song with targetPart set. */
     juce::AudioBuffer<float> renderEvents (const std::vector<std::pair<int64_t, MidiEvent>>& events, int64_t totalSamples);

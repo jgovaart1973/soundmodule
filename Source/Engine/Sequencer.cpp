@@ -1,20 +1,89 @@
 #include "Engine/Sequencer.h"
 
 #include <algorithm>
+#include <thread>
 
 namespace km
 {
 //==============================================================================
-std::unique_ptr<PlaybackSnapshot> PlaybackSnapshot::build (const Song& song)
+double PlaybackSnapshot::tempoAt (double beat) const noexcept
+{
+    double bpm = tempo.empty() ? 120.0 : tempo.front().bpm;
+    for (auto& seg : tempo)
+    {
+        if (seg.beat > beat + 1.0e-9)
+            break;
+        bpm = seg.bpm;
+    }
+    return bpm;
+}
+
+double PlaybackSnapshot::beatToSeconds (double beat) const noexcept
+{
+    const TempoSegment* seg = nullptr;
+    for (auto& s : tempo)
+    {
+        if (s.beat > beat + 1.0e-9)
+            break;
+        seg = &s;
+    }
+    if (seg == nullptr)
+        return beat * 60.0 / (tempo.empty() ? 120.0 : tempo.front().bpm);
+    return seg->seconds + (beat - seg->beat) * 60.0 / seg->bpm;
+}
+
+std::unique_ptr<PlaybackSnapshot> PlaybackSnapshot::build (const Song& song, AudioCache* cache, double sr, bool silenceArmed)
 {
     auto snap = std::make_unique<PlaybackSnapshot>();
+    snap->sampleRate = sr;
+
+    snap->tempo.push_back ({ 0.0, song.bpm, 0.0 });
+    for (auto& tc : song.tempoChanges)
+        snap->tempo.push_back ({ tc.beat, tc.bpm, song.beatToSeconds (tc.beat) });
+
     bool anySolo = false;
     for (auto& t : song.tracks)
         anySolo = anySolo || t.solo;
 
+    snap->tracks.resize (song.tracks.size());
+    for (size_t ti = 0; ti < song.tracks.size(); ++ti)
+    {
+        const auto& t = song.tracks[ti];
+        auto& mix = snap->tracks[ti];
+        mix.isAudio = t.isAudio();
+        mix.audible = ! t.mute && ! (anySolo && ! t.solo);
+        mix.armed = t.armed;
+        mix.monitor = t.monitor;
+        mix.input = t.input;
+        const float vol = juce::Decibels::decibelsToGain (t.volumeDb, -80.0f);
+        const float angle = (juce::jlimit (-1.0f, 1.0f, t.pan) + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
+        mix.gainLeft = vol * std::cos (angle) * 1.41421356f;
+        mix.gainRight = vol * std::sin (angle) * 1.41421356f;
+
+        if (! t.isAudio() || cache == nullptr || ! mix.audible || (silenceArmed && t.armed))
+            continue;
+
+        for (auto& a : t.audioClips)
+        {
+            if (a.muted || a.duration <= 0.0)
+                continue;
+            auto data = cache->get (juce::File (a.file), sr);
+            if (data == nullptr)
+                continue;
+            AudioRegion r;
+            r.startSeconds = song.beatToSeconds (a.start);
+            r.duration = a.duration;
+            r.fileOffset = (int64_t) std::llround (a.offset * sr);
+            r.data = std::move (data);
+            r.gain = juce::Decibels::decibelsToGain (a.gainDb, -80.0f);
+            r.track = (int) ti;
+            snap->audio.push_back (std::move (r));
+        }
+    }
+
     for (auto& t : song.tracks)
     {
-        if (t.mute || (anySolo && ! t.solo))
+        if (t.isAudio() || t.mute || (anySolo && ! t.solo) || (silenceArmed && t.armed))
             continue;
         const auto part = (int8_t) juce::jlimit (0, kNumParts - 1, t.part);
 
@@ -109,9 +178,12 @@ void Sequencer::collectGarbage()
     }
 }
 
-void Sequencer::prepare (double sr, int)
+void Sequencer::prepare (double sr, int block)
 {
     sampleRate = sr > 0 ? sr : 48000.0;
+    maxBlock = juce::jmax (16, block);
+    silence.setSize (1, maxBlock);
+    silence.clear();
     clickLength = (int) (0.03 * sampleRate);
 }
 
@@ -192,7 +264,7 @@ int Sequencer::generate (int n, MidiEvent* out, int* positions, int maxEvents) n
     blockRolling = blockCountIn = false;
     numClickStarts = 0;
 
-    const double bps = bpm.load() / 60.0 / sampleRate;
+    double bps = bpm.load() / 60.0 / sampleRate;
     const double barLength = juce::jmax (0.25, beatsPerBar.load() * 4.0 / juce::jmax (1, beatUnit.load()));
     auto curMode = mode.load();
 
@@ -246,6 +318,9 @@ int Sequencer::generate (int n, MidiEvent* out, int* positions, int maxEvents) n
 
     if ((cmds & cmdPlay) != 0 && curMode == Mode::stopped)
         curMode = Mode::playing;
+
+    // Follow the song's tempo map (tempo taken at the start of the block).
+    bps = (current != nullptr ? current->tempoAt (position.load()) : bpm.load()) / 60.0 / sampleRate;
 
     auto addClicks = [&] (double from, double to, double mapBeat, int posOffset)
     {
@@ -359,6 +434,138 @@ void Sequencer::renderClicks (juce::AudioBuffer<float>& bus, int n) noexcept
         --clickRemaining;
         l[i] += s;
         r[i] += s;
+    }
+}
+
+//==============================================================================
+int Sequencer::attachRecorder (std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer, int input)
+{
+    for (int i = 0; i < maxAudioRecorders; ++i)
+    {
+        auto& slot = recorders[i];
+        if (slot.writer.load() != nullptr)
+            continue;
+        slot.input = input;
+        slot.startBeat = -1.0;
+        slot.written = 0;
+        slot.stopped = false;
+        slot.writer = writer.release();
+        return i;
+    }
+    return -1;
+}
+
+AudioRecordResult Sequencer::detachRecorder (int index)
+{
+    AudioRecordResult result;
+    if (! juce::isPositiveAndBelow (index, maxAudioRecorders))
+        return result;
+
+    auto& slot = recorders[index];
+    auto* w = slot.writer.exchange (nullptr);
+    while (slot.busy.load())        // the audio thread is inside write(): a few microseconds at most
+        std::this_thread::yield();
+
+    result.writer.reset (w);
+    result.startBeat = slot.startBeat.load();
+    result.samplesWritten = slot.written.load();
+    return result;
+}
+
+void Sequencer::processAudio (juce::AudioBuffer<float>& bus, const float* const* inputs, int numInputs, int n) noexcept
+{
+    auto inputChannel = [&] (int ch) -> const float*
+    {
+        return (inputs != nullptr && ch < numInputs && inputs[ch] != nullptr) ? inputs[ch] : silence.getReadPointer (0);
+    };
+
+    // --- recording: write the selected input straight into a background file writer
+    for (auto& slot : recorders)
+    {
+        slot.busy = true;
+        auto* w = slot.writer.load();
+        if (w != nullptr && blockRolling && recording.load() && ! slot.stopped.load())
+        {
+            const int input = slot.input.load();
+            const float* chans[2] = { inputChannel (input == 2 ? 1 : 0), inputChannel (input == 0 ? 1 : 0) };
+            int count = n;
+            if (wrapAt >= 0)
+            {
+                count = wrapAt;          // audio is recorded once: stop at the loop end
+                slot.stopped = true;
+            }
+            if (slot.startBeat.load() < 0.0)
+                slot.startBeat = blockStartBeat;
+            if (count > 0 && w->write (chans, count))
+                slot.written.fetch_add (count);
+        }
+        slot.busy = false;
+    }
+
+    if (current == nullptr)
+        return;
+    auto* left = bus.getWritePointer (0);
+    auto* right = bus.getWritePointer (1);
+
+    // --- input monitoring for armed audio tracks
+    for (auto& mix : current->tracks)
+    {
+        if (! mix.isAudio || ! mix.armed || ! mix.monitor)
+            continue;
+        const float* inL = inputChannel (mix.input == 2 ? 1 : 0);
+        const float* inR = inputChannel (mix.input == 0 ? 1 : 0);
+        for (int i = 0; i < n; ++i)
+        {
+            left[i] += inL[i] * mix.gainLeft;
+            right[i] += inR[i] * mix.gainRight;
+        }
+    }
+
+    // --- audio clips (time based: they play at their own speed whatever the tempo)
+    if (! blockRolling || current->audio.empty())
+        return;
+
+    auto playSegment = [&] (double startBeat, int from, int to)
+    {
+        const double t0 = current->beatToSeconds (startBeat);
+        const double t1 = t0 + (to - from) / sampleRate;
+
+        for (auto& r : current->audio)
+        {
+            if (r.startSeconds >= t1 || r.startSeconds + r.duration <= t0 || r.data == nullptr)
+                continue;
+            if (std::abs (r.data->sampleRate - sampleRate) > 0.5)
+                continue; // device rate changed; a rebuilt snapshot is on its way
+
+            const auto& mix = current->tracks[(size_t) r.track];
+            const auto& audio = r.data->audio;
+            const int fileChans = audio.getNumChannels();
+            const auto regionSamples = (int64_t) (r.duration * sampleRate);
+
+            for (int i = from; i < to; ++i)
+            {
+                const auto inRegion = (int64_t) std::floor ((t0 - r.startSeconds) * sampleRate) + (i - from);
+                if (inRegion < 0 || inRegion >= regionSamples)
+                    continue;
+                const auto idx = r.fileOffset + inRegion;
+                if (idx < 0 || idx >= audio.getNumSamples())
+                    continue;
+                const float l = audio.getSample (0, (int) idx) * r.gain;
+                const float rr = audio.getSample (fileChans > 1 ? 1 : 0, (int) idx) * r.gain;
+                left[i] += l * mix.gainLeft;
+                right[i] += rr * mix.gainRight;
+            }
+        }
+    };
+
+    if (wrapAt < 0)
+    {
+        playSegment (blockStartBeat, 0, n);
+    }
+    else
+    {
+        playSegment (blockStartBeat, 0, wrapAt);
+        playSegment (wrapBeat, wrapAt, n);
     }
 }
 

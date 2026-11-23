@@ -24,7 +24,7 @@ class SettingsComponent::AudioPage final : public juce::Component
 {
 public:
     explicit AudioPage (AppController& c)
-        : selector (c.getDeviceManager(), 0, 0, 2, 2, false, false, true, false)
+        : selector (c.getDeviceManager(), 0, 2, 2, 2, false, false, true, false)
     {
         addAndMakeVisible (selector);
         addAndMakeVisible (testTone);

@@ -38,7 +38,8 @@ void ModuleEngine::prepare (double newSampleRate, int maxBlockSize)
 
 //==============================================================================
 void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
-                            const MidiEvent* events, const int* positions, int numEvents) noexcept
+                            const MidiEvent* events, const int* positions, int numEvents,
+                            const float* const* inputs, int numInputs) noexcept
 {
     juce::ScopedNoDenormals noDenormals;
     jassert (n <= maxBlock && out.getNumChannels() >= 2);
@@ -123,6 +124,7 @@ void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
         testToneRemaining.store (remaining - count, std::memory_order_relaxed);
     }
 
+    sequencer.processAudio (mainView, inputs, numInputs, n);   // audio tracks, monitoring, recording
     sequencer.renderClicks (mainView, n);
     masterFx.process (mainView, n, master.volumeDb.load(), master.limiterThresholdDb.load());
 
@@ -136,7 +138,7 @@ void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
 }
 
 //==============================================================================
-void ModuleEngine::audioDeviceIOCallbackWithContext (const float* const*, int,
+void ModuleEngine::audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,
                                                      float* const* outputs, int numOutputs, int numSamples,
                                                      const juce::AudioIODeviceCallbackContext&)
 {
@@ -162,7 +164,11 @@ void ModuleEngine::audioDeviceIOCallbackWithContext (const float* const*, int,
     {
         const int chunk = juce::jmin (maxBlock, numSamples - done);
         juce::AudioBuffer<float> view (deviceScratch.getArrayOfWritePointers(), 2, chunk);
-        process (view, chunk, liveEvents.data(), livePositions.data(), first ? numEvents : 0);
+        const float* chunkInputs[8] {};
+        const int ins = juce::jmin (8, numInputs);
+        for (int ch = 0; ch < ins; ++ch)
+            chunkInputs[ch] = inputs[ch] != nullptr ? inputs[ch] + done : nullptr;
+        process (view, chunk, liveEvents.data(), livePositions.data(), first ? numEvents : 0, chunkInputs, ins);
         first = false;
 
         for (int ch = 0; ch < numOutputs; ++ch)

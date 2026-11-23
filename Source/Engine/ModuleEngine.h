@@ -53,7 +53,8 @@ public:
     //== audio thread / offline ===============================================
     /** Render numSamples (<= getMaxBlockSize()) into out (stereo). Events have sample offsets. */
     void process (juce::AudioBuffer<float>& out, int numSamples,
-                  const MidiEvent* events, const int* eventPositions, int numEvents) noexcept;
+                  const MidiEvent* events, const int* eventPositions, int numEvents,
+                  const float* const* inputs = nullptr, int numInputs = 0) noexcept;
 
     //== juce::AudioIODeviceCallback ==========================================
     void audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs,

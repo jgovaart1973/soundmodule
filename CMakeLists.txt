@@ -71,6 +71,7 @@ target_sources(km_core PRIVATE
     Source/Engine/Effects.cpp
     Source/Engine/ModuleEngine.cpp
     Source/Engine/Sequencer.cpp
+    Source/Engine/AudioCache.cpp
     Source/Midi/MidiRouter.cpp
     Source/Midi/MidiLearn.cpp
     Source/Model/Performance.cpp

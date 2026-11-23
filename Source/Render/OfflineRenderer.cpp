@@ -91,6 +91,25 @@ juce::AudioBuffer<float> OfflineRenderer::render (const juce::MidiMessageSequenc
     return renderEvents (events, (int64_t) std::ceil ((seq.getEndTime() + tailSeconds) * sampleRate));
 }
 
+juce::AudioBuffer<float> OfflineRenderer::renderSong (const Song& song, AudioCache& cache, double tailSeconds)
+{
+    auto& seq = engine.sequencer;
+    seq.bpm = song.bpm;
+    seq.beatsPerBar = song.beatsPerBar;
+    seq.beatUnit = song.beatUnit;
+    seq.loopEnabled = false;
+    seq.metronomeOn = false;
+    seq.setSnapshot (PlaybackSnapshot::build (song, &cache, sampleRate, false));
+    seq.locate (0.0);
+    seq.play();
+
+    const double seconds = song.beatToSeconds (song.getEndBeat()) + tailSeconds;
+    auto audio = renderEvents ({}, (int64_t) std::ceil (seconds * sampleRate));
+    seq.stop();
+    seq.collectGarbage();
+    return audio;
+}
+
 juce::AudioBuffer<float> OfflineRenderer::renderEvents (const std::vector<std::pair<int64_t, MidiEvent>>& all, int64_t total)
 {
     const int totalSamples = (int) juce::jlimit<int64_t> (1, (int64_t) std::numeric_limits<int>::max(), total);

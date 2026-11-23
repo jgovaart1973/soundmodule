@@ -26,9 +26,80 @@ double Song::getEndBeat() const
 {
     double end = 0.0;
     for (auto& t : tracks)
+    {
         for (auto& c : t.clips)
             end = juce::jmax (end, c.end());
+        for (auto& a : t.audioClips)
+            end = juce::jmax (end, audioClipEndBeat (a));
+    }
     return end;
+}
+
+//==============================================================================
+double Song::tempoAt (double beat) const noexcept
+{
+    double t = bpm;
+    for (auto& c : tempoChanges)
+    {
+        if (c.beat > beat + 1.0e-9)
+            break;
+        t = c.bpm;
+    }
+    return t;
+}
+
+double Song::beatToSeconds (double beat) const noexcept
+{
+    double seconds = 0.0, from = 0.0, tempo = bpm;
+    for (auto& c : tempoChanges)
+    {
+        if (c.beat >= beat)
+            break;
+        seconds += (c.beat - from) * 60.0 / tempo;
+        from = c.beat;
+        tempo = c.bpm;
+    }
+    return seconds + (beat - from) * 60.0 / tempo;
+}
+
+double Song::secondsToBeat (double seconds) const noexcept
+{
+    double at = 0.0, from = 0.0, tempo = bpm;
+    for (auto& c : tempoChanges)
+    {
+        const double segment = (c.beat - from) * 60.0 / tempo;
+        if (at + segment >= seconds)
+            break;
+        at += segment;
+        from = c.beat;
+        tempo = c.bpm;
+    }
+    return from + (seconds - at) * tempo / 60.0;
+}
+
+void Song::setTempoAt (double beat, double newBpm)
+{
+    newBpm = juce::jlimit (20.0, 400.0, newBpm);
+    if (beat <= 1.0e-9)
+    {
+        bpm = newBpm;
+        return;
+    }
+    for (auto& c : tempoChanges)
+        if (std::abs (c.beat - beat) < 1.0e-6)
+        {
+            c.bpm = newBpm;
+            return;
+        }
+    tempoChanges.push_back ({ beat, newBpm });
+    std::sort (tempoChanges.begin(), tempoChanges.end(), [] (const TempoChange& a, const TempoChange& b) { return a.beat < b.beat; });
+}
+
+void Song::removeTempoChange (double beat)
+{
+    tempoChanges.erase (std::remove_if (tempoChanges.begin(), tempoChanges.end(),
+                                        [beat] (const TempoChange& c) { return std::abs (c.beat - beat) < 1.0e-6; }),
+                        tempoChanges.end());
 }
 
 //==============================================================================
@@ -45,6 +116,11 @@ juce::String Song::toJson() const
     root->setProperty ("loopStart", loopStart);
     root->setProperty ("loopEnd", loopEnd);
 
+    juce::Array<juce::var> tempoList;
+    for (auto& tc : tempoChanges)
+        tempoList.add (juce::Array<juce::var> { tc.beat, tc.bpm });
+    root->setProperty ("tempoChanges", tempoList);
+
     juce::var perf;
     juce::JSON::parse (performance.toJson(), perf);
     root->setProperty ("performance", perf);
@@ -54,7 +130,30 @@ juce::String Song::toJson() const
     {
         auto* to = new juce::DynamicObject();
         to->setProperty ("name", t.name);
+        to->setProperty ("kind", t.isAudio() ? "audio" : "midi");
         to->setProperty ("part", t.part + 1);
+        if (t.isAudio())
+        {
+            to->setProperty ("volumeDb", t.volumeDb);
+            to->setProperty ("pan", t.pan);
+            to->setProperty ("input", t.input);
+            to->setProperty ("monitor", t.monitor);
+            juce::Array<juce::var> audioList;
+            for (auto& a : t.audioClips)
+            {
+                auto* ao = new juce::DynamicObject();
+                ao->setProperty ("name", a.name);
+                ao->setProperty ("file", a.file);
+                ao->setProperty ("start", a.start);
+                ao->setProperty ("offset", a.offset);
+                ao->setProperty ("duration", a.duration);
+                ao->setProperty ("gainDb", a.gainDb);
+                ao->setProperty ("muted", a.muted);
+                ao->setProperty ("take", a.take);
+                audioList.add (juce::var (ao));
+            }
+            to->setProperty ("audioClips", audioList);
+        }
         to->setProperty ("mute", t.mute);
         to->setProperty ("solo", t.solo);
 
@@ -113,6 +212,11 @@ bool Song::fromJson (const juce::String& json, juce::String& error)
     s.loopStart = juce::jmax (0.0, (double) prop (root, "loopStart", 0.0));
     s.loopEnd = juce::jmax (s.loopStart + 0.25, (double) prop (root, "loopEnd", 16.0));
 
+    if (auto* tempos = prop (root, "tempoChanges", {}).getArray())
+        for (auto& tc : *tempos)
+            if (tc.size() >= 2 && (double) tc[0] > 0.0)
+                s.setTempoAt ((double) tc[0], (double) tc[1]);
+
     if (auto perf = prop (root, "performance", {}); perf.isObject())
     {
         juce::String perr;
@@ -129,6 +233,27 @@ bool Song::fromJson (const juce::String& json, juce::String& error)
             t.part = juce::jlimit (0, kNumParts - 1, (int) prop (tv, "part", 1) - 1);
             t.mute = (bool) prop (tv, "mute", false);
             t.solo = (bool) prop (tv, "solo", false);
+            t.kind = prop (tv, "kind", "midi").toString() == "audio" ? Track::Kind::audio : Track::Kind::midi;
+            t.volumeDb = juce::jlimit (-80.0f, 12.0f, (float) (double) prop (tv, "volumeDb", 0.0));
+            t.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) prop (tv, "pan", 0.0));
+            t.input = juce::jlimit (0, 2, (int) prop (tv, "input", 0));
+            t.monitor = (bool) prop (tv, "monitor", false);
+
+            if (auto* audioArray = prop (tv, "audioClips", {}).getArray())
+                for (auto& av : *audioArray)
+                {
+                    AudioClip a;
+                    a.name = prop (av, "name", "").toString();
+                    a.file = prop (av, "file", "").toString();
+                    a.start = juce::jmax (0.0, (double) prop (av, "start", 0.0));
+                    a.offset = juce::jmax (0.0, (double) prop (av, "offset", 0.0));
+                    a.duration = juce::jmax (0.0, (double) prop (av, "duration", 0.0));
+                    a.gainDb = juce::jlimit (-60.0f, 24.0f, (float) (double) prop (av, "gainDb", 0.0));
+                    a.muted = (bool) prop (av, "muted", false);
+                    a.take = (int) prop (av, "take", 1);
+                    if (a.file.isNotEmpty())
+                        t.audioClips.push_back (a);
+                }
 
             if (auto* clips = prop (tv, "clips", {}).getArray())
             {
@@ -191,11 +316,15 @@ juce::MidiFile Song::toMidiFile() const
     juce::MidiMessageSequence conductor;
     conductor.addEvent (juce::MidiMessage::textMetaEvent (3, name));
     conductor.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::round (60000000.0 / bpm)));
+    for (auto& tc : tempoChanges)
+        conductor.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::round (60000000.0 / tc.bpm)), tick (tc.beat));
     conductor.addEvent (juce::MidiMessage::timeSignatureMetaEvent (beatsPerBar, beatUnit));
     file.addTrack (conductor);
 
     for (auto& t : tracks)
     {
+        if (t.isAudio())
+            continue; // audio cannot go into a MIDI file
         juce::MidiMessageSequence seq;
         seq.addEvent (juce::MidiMessage::textMetaEvent (3, t.name));
         const int channel = t.part + 1; // channel = part number, so importing maps back to the same part
@@ -235,7 +364,19 @@ int Song::importMidiFile (const juce::MidiFile& source)
     file.findAllTempoEvents (tempoEvents);
     file.findAllTimeSigEvents (sigEvents);
     if (tempoEvents.getNumEvents() > 0)
+    {
         bpm = juce::jlimit (20.0, 400.0, 60.0 / tempoEvents.getEventPointer (0)->message.getTempoSecondsPerQuarterNote());
+        tempoChanges.clear();
+        if (format > 0) // tempo changes need musical (tick) time
+            for (int i = 0; i < tempoEvents.getNumEvents(); ++i)
+            {
+                const auto& m = tempoEvents.getEventPointer (i)->message;
+                const double beat = m.getTimeStamp() / (double) format;
+                const double value = 60.0 / m.getTempoSecondsPerQuarterNote();
+                if (beat <= 1.0e-9) bpm = juce::jlimit (20.0, 400.0, value);
+                else                setTempoAt (beat, value);
+            }
+    }
     if (sigEvents.getNumEvents() > 0)
     {
         int num = 4, den = 4;

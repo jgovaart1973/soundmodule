@@ -47,6 +47,8 @@ namespace
     {
         AppController& app;
         double peak = 0.0;
+        std::function<float (int64_t)> input;   ///< optional signal on audio inputs 1+2
+        int64_t inputClock = 0;
 
         float run (double seconds, std::vector<std::pair<double, MidiEvent>> live = {})
         {
@@ -66,7 +68,17 @@ namespace
                     pos.push_back (juce::jmax (0, (int) (live[next].first * sr) - start));
                     ++next;
                 }
-                engine.process (out, block, ev.data(), pos.data(), (int) ev.size());
+                juce::AudioBuffer<float> in (2, block);
+                in.clear();
+                if (input)
+                    for (int i = 0; i < block; ++i)
+                    {
+                        const float v = input (inputClock++);
+                        in.setSample (0, i, v);
+                        in.setSample (1, i, v);
+                    }
+                engine.process (out, block, ev.data(), pos.data(), (int) ev.size(),
+                                in.getArrayOfReadPointers(), input ? 2 : 0);
                 maxPeak = juce::jmax (maxPeak, out.getMagnitude (0, block));
                 app.getSongController().tick(); // normally the 30 Hz UI timer
             }
@@ -464,4 +476,176 @@ TEST_CASE ("Notes drawn in the piano roll play back; duplicating repeats them", 
     // A note longer than the clip makes the clip longer.
     s.setClipNotes (track, clip, { { 3.0, 3.0, 60, 100, 1 } }, "Noot verlengen");
     REQUIRE (s.getClip (track, clip)->length == 8.0);
+}
+
+//==============================================================================
+namespace
+{
+    juce::File writeSine (const juce::File& file, double sampleRate, double seconds, float amplitude = 0.5f)
+    {
+        juce::AudioBuffer<float> b (1, (int) (sampleRate * seconds));
+        for (int i = 0; i < b.getNumSamples(); ++i)
+            b.setSample (0, i, amplitude * (float) std::sin (juce::MathConstants<double>::twoPi * 440.0 * i / sampleRate));
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> stream (file.createOutputStream());
+        auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (sampleRate).withNumChannels (1).withBitsPerSample (24));
+        writer->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        return file;
+    }
+} // namespace
+
+TEST_CASE ("Tempo map converts between beats and seconds", "[tempo]")
+{
+    Song s;
+    s.bpm = 120.0;
+    s.setTempoAt (4.0, 60.0);
+    REQUIRE_THAT (s.beatToSeconds (4.0), WithinAbs (2.0, 1e-9));
+    REQUIRE_THAT (s.beatToSeconds (6.0), WithinAbs (4.0, 1e-9));
+    REQUIRE_THAT (s.secondsToBeat (4.0), WithinAbs (6.0, 1e-9));
+    REQUIRE_THAT (s.secondsToBeat (1.0), WithinAbs (2.0, 1e-9));
+    REQUIRE (s.tempoAt (3.9) == 120.0);
+    REQUIRE (s.tempoAt (5.0) == 60.0);
+
+    s.setTempoAt (4.0, 90.0);            // same beat: replaced, not added
+    REQUIRE (s.tempoChanges.size() == 1);
+    s.setTempoAt (0.0, 100.0);           // beat 0 sets the start tempo
+    REQUIRE (s.bpm == 100.0);
+    s.removeTempoChange (4.0);
+    REQUIRE (s.tempoChanges.empty());
+}
+
+TEST_CASE ("Tempo changes and audio tracks survive JSON and MIDI files", "[tempo]")
+{
+    Song s = makeSongWithNote (0.0, 1.0);
+    s.setTempoAt (8.0, 90.0);
+    Track a;
+    a.kind = Track::Kind::audio;
+    a.volumeDb = -6.0f;
+    a.input = 2;
+    a.audioClips.push_back ({ "Zang", "C:/x.wav", 4.0, 0.01, 3.5, -2.0f, false, 2 });
+    s.tracks.push_back (a);
+
+    Song r;
+    juce::String error;
+    REQUIRE (r.fromJson (s.toJson(), error));
+    REQUIRE (r.tempoChanges.size() == 1);
+    REQUIRE (r.tempoChanges[0].bpm == 90.0);
+    REQUIRE (r.tracks[1].isAudio());
+    REQUIRE (r.tracks[1].volumeDb == -6.0f);
+    REQUIRE (r.tracks[1].input == 2);
+    REQUIRE (r.tracks[1].audioClips.at (0).duration == 3.5);
+
+    Song imported;
+    REQUIRE (imported.importMidiFile (s.toMidiFile()) == 1);  // the audio track is not in the MIDI file
+    REQUIRE (imported.tempoChanges.size() == 1);
+    REQUIRE_THAT (imported.tempoChanges[0].beat, WithinAbs (8.0, 0.002));
+    REQUIRE_THAT (imported.tempoChanges[0].bpm, WithinAbs (90.0, 0.01));
+}
+
+TEST_CASE ("The transport follows tempo changes", "[tempo]")
+{
+    Fixture f;
+    f.song().setTempoAt (2.0, 60.0);   // 120 BPM for 2 beats (1 s), then 60 BPM
+    f.drive.run (0.05);
+    f.song().play();
+    f.drive.run (2.0);
+    REQUIRE_THAT (f.app.getEngine().sequencer.getPosition(), WithinAbs (3.0, 0.03));
+}
+
+TEST_CASE ("An imported audio file plays at its place in the song", "[audio]")
+{
+    Fixture f;
+    const auto file = writeSine (paths::recordingsDir().getChildFile ("sine.wav"), 48000.0, 1.0);
+    juce::String error;
+    REQUIRE (f.song().importAudio (file, -1, 4.0, error));   // beat 4 = 2 s at 120 BPM
+    REQUIRE (f.song().getSong().tracks.at (0).isAudio());
+    REQUIRE_THAT (f.song().getSong().tracks[0].audioClips.at (0).duration, WithinAbs (1.0, 0.001));
+
+    f.drive.run (0.05);
+    f.song().play();
+    REQUIRE (f.drive.run (1.9) < 0.001f);     // before the clip
+    REQUIRE (f.drive.run (0.5) > 0.3f);       // the sine
+    f.drive.run (0.7);
+    REQUIRE (f.drive.run (0.3) < 0.001f);     // after the clip
+
+    f.song().setTrackMute (0, true);
+    f.song().locate (4.0);
+    REQUIRE (f.drive.run (0.3) < 0.001f);
+}
+
+TEST_CASE ("Audio files at another sample rate are converted", "[audio]")
+{
+    AudioCache cache;
+    const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory);
+    const auto file = writeSine (dir.getChildFile ("km_sine44.wav"), 44100.0, 1.0);
+    auto data = cache.get (file, 48000.0);
+    REQUIRE (data != nullptr);
+    REQUIRE_THAT (data->durationSeconds(), WithinAbs (1.0, 0.002));
+    REQUIRE (data->audio.getNumSamples() == 48000);
+    REQUIRE_FALSE (data->peaks.empty());
+    REQUIRE (cache.get (file, 48000.0) == data);   // cached
+    file.deleteFile();
+}
+
+TEST_CASE ("Recording an audio track writes the input to a file and plays it back", "[audio]")
+{
+    Fixture f;
+    const int track = f.song().addAudioTrack();
+    f.song().setTrackArmed (track, true);
+    f.song().setCountIn (false);
+
+    f.drive.input = [] (int64_t n) { return 0.4f * (float) std::sin (juce::MathConstants<double>::twoPi * 330.0 * (double) n / sr); };
+    f.song().record();
+    f.drive.run (1.0);
+    f.song().stop();
+    f.drive.input = nullptr;
+    f.drive.run (0.1);
+
+    REQUIRE_FALSE (f.song().isRecordingAudio());
+    const auto& clips = f.song().getSong().tracks[(size_t) track].audioClips;
+    REQUIRE (clips.size() == 1);
+    REQUIRE_THAT (clips[0].start, WithinAbs (0.0, 0.02));
+    REQUIRE_THAT (clips[0].duration, WithinAbs (1.0, 0.02));
+    REQUIRE (juce::File (clips[0].file).existsAsFile());
+    REQUIRE (f.song().getUndoDescription() == "Audio-opname");
+
+    // Disarm (otherwise the track is silent, waiting to be re-recorded) and play it back.
+    f.song().setTrackArmed (track, false);
+    f.song().locate (0.0);
+    f.song().play();
+    REQUIRE (f.drive.run (0.5) > 0.3f);
+}
+
+TEST_CASE ("Input monitoring only when the audio track is armed with monitor on", "[audio]")
+{
+    Fixture f;
+    const int track = f.song().addAudioTrack();
+    f.drive.input = [] (int64_t) { return 0.25f; };
+    REQUIRE (f.drive.run (0.1) < 0.001f);
+    f.song().setTrackArmed (track, true);
+    f.song().setTrackMonitor (track, true);
+    REQUIRE (f.drive.run (0.1) > 0.2f);
+    f.song().setTrackMonitor (track, false);
+    REQUIRE (f.drive.run (0.1) < 0.001f);
+}
+
+TEST_CASE ("Audio export contains audio tracks and follows the tempo map", "[audio]")
+{
+    Fixture f;
+    const auto file = writeSine (paths::recordingsDir().getChildFile ("sine2.wav"), 48000.0, 0.5);
+    juce::String error;
+    f.song().setTempoAt (2.0, 60.0);
+    REQUIRE (f.song().importAudio (file, -1, 3.0, error));   // beat 3 = 1 s + 1 s = 2 s
+
+    const auto out = paths::songsDir().getChildFile ("mix.wav");
+    REQUIRE (f.song().exportAudio (out, error));
+
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (out));
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> mix (2, (int) reader->lengthInSamples);
+    reader->read (&mix, 0, mix.getNumSamples(), 0, true, true);
+    REQUIRE (mix.getMagnitude (0, (int) (1.9 * sr)) < 0.001f);          // silent before 2 s
+    REQUIRE (mix.getMagnitude ((int) (2.05 * sr), (int) (0.3 * sr)) > 0.3f);
 }

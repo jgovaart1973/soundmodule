@@ -76,9 +76,18 @@ void AppController::initialise()
     router.start();
 
     // Audio
-    engine.onAboutToStart = [this] (double sr, int bs) { pool.setAudioConfig (sr, bs); };
     // (WeakReference is created out here: MSVC rejects 'this' in a nested lambda's init-capture.)
     const auto weakSelf = juce::WeakReference<AppController> (this);
+    engine.onAboutToStart = [this, weakSelf] (double sr, int bs)
+    {
+        pool.setAudioConfig (sr, bs);
+        // Audio clips are kept at the device rate: rebuild when it changes.
+        juce::MessageManager::callAsync ([weak = weakSelf]
+        {
+            if (weak != nullptr)
+                weak->songController->audioConfigChanged();
+        });
+    };
     engine.onDeviceError = [this, weakSelf] (const juce::String& message)
     {
         deviceErrorPending = true;
@@ -137,7 +146,8 @@ void AppController::initialiseAudio()
         }
     }
 
-    const auto error = deviceManager.initialise (0, 2, saved.get(), true, preferredType, &preferred);
+    // Two inputs for audio tracks (microphone, guitar, line in).
+    const auto error = deviceManager.initialise (2, 2, saved.get(), true, preferredType, &preferred);
     if (error.isNotEmpty())
         setStatus ("Audio kon niet starten: " + error);
 
@@ -275,6 +285,12 @@ bool AppController::isAudioRunning() const
 {
     auto* device = deviceManager.getCurrentAudioDevice();
     return device != nullptr && device->isPlaying();
+}
+
+int AppController::getRoundTripLatencySamples() const
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    return device != nullptr ? device->getInputLatencyInSamples() + device->getOutputLatencyInSamples() : 0;
 }
 
 int AppController::getXRunCount() const

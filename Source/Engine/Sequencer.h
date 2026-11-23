@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/SpscQueue.h"
+#include "Engine/AudioCache.h"
 #include "Midi/MidiEvent.h"
 #include "Model/Song.h"
 
@@ -21,11 +22,50 @@ struct SeqEvent
     uint8_t data[3] {};
 };
 
-/** Immutable, sorted event list the audio thread plays from. Rebuilt on the message thread on every edit. */
+/** Immutable playback data the audio thread plays from. Rebuilt on the message thread on every edit. */
 struct PlaybackSnapshot
 {
-    std::vector<SeqEvent> events;
-    static std::unique_ptr<PlaybackSnapshot> build (const Song& song);
+    std::vector<SeqEvent> events;   ///< MIDI, sorted by beat
+
+    struct TempoSegment { double beat, bpm, seconds; };
+    std::vector<TempoSegment> tempo; ///< first segment starts at beat 0
+
+    /** An audio clip, in song seconds, ready to copy from memory. */
+    struct AudioRegion
+    {
+        double startSeconds = 0.0, duration = 0.0;
+        int64_t fileOffset = 0;      ///< first sample to play
+        std::shared_ptr<const AudioFileData> data;
+        float gain = 1.0f;
+        int track = 0;
+    };
+    std::vector<AudioRegion> audio;
+
+    /** Mixer settings of audio tracks, indexed by song track. */
+    struct AudioTrackMix
+    {
+        bool isAudio = false, audible = true, armed = false, monitor = false;
+        float gainLeft = 1.0f, gainRight = 1.0f;
+        int input = 0;
+    };
+    std::vector<AudioTrackMix> tracks;
+    double sampleRate = 48000.0;
+
+    double tempoAt (double beat) const noexcept;
+    double beatToSeconds (double beat) const noexcept;
+
+    /** @param cache   loads audio clips (nullptr = MIDI only)
+        @param silenceArmed  armed tracks are silent (they are being re-recorded) */
+    static std::unique_ptr<PlaybackSnapshot> build (const Song& song, AudioCache* cache = nullptr,
+                                                    double sampleRate = 48000.0, bool silenceArmed = false);
+};
+
+/** Result of an audio recording, handed back to the message thread. */
+struct AudioRecordResult
+{
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer; ///< delete it to flush the file
+    double startBeat = -1.0;
+    int64_t samplesWritten = 0;
 };
 
 /** Something a part received from a keyboard, time-stamped for recording. */
@@ -98,6 +138,16 @@ public:
     /** Metronome / count-in clicks into the bus. */
     void renderClicks (juce::AudioBuffer<float>& bus, int numSamples) noexcept;
 
+    /** Audio clips, input monitoring and audio recording for this block. */
+    void processAudio (juce::AudioBuffer<float>& bus, const float* const* inputs, int numInputs, int numSamples) noexcept;
+
+    //== audio recording (message thread) =====================================
+    static constexpr int maxAudioRecorders = 8;
+    /** Start writing an input to a file while recording. @returns slot, or -1 if all slots are busy. */
+    int attachRecorder (std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer, int input);
+    /** Stop writing; waits for the audio thread to let go. */
+    AudioRecordResult detachRecorder (int slot);
+
     /** End of block. */
     void advance (int numSamples) noexcept;
 
@@ -128,6 +178,19 @@ private:
     std::atomic<int64_t> sampleCounter { 0 };
 
     double sampleRate = 48000.0;
+    int maxBlock = 512;
+
+    struct RecorderSlot
+    {
+        std::atomic<juce::AudioFormatWriter::ThreadedWriter*> writer { nullptr };
+        std::atomic<bool> busy { false };
+        std::atomic<bool> stopped { false };
+        std::atomic<int> input { 0 };
+        std::atomic<double> startBeat { -1.0 };
+        std::atomic<int64_t> written { 0 };
+    };
+    RecorderSlot recorders[maxAudioRecorders];
+    juce::AudioBuffer<float> silence;
 
     // Block mapping (audio thread), used by capture() and renderClicks()
     double blockStartBeat = 0.0, blockBeatsPerSample = 0.0;

@@ -48,6 +48,7 @@ juce::File userDir()
 juce::File performancesDir() { return ensure (userDir().getChildFile ("Performances")); }
 juce::File soundsDir()       { return ensure (userDir().getChildFile ("Sounds")); }
 juce::File songsDir()        { return ensure (userDir().getChildFile ("Songs")); }
+juce::File recordingsDir()   { return ensure (userDir().getChildFile ("Recordings")); }
 juce::File songAutosaveFile() { return appDataDir().getChildFile ("autosave-song.kmsong"); }
 
 juce::File autosaveFile()      { return appDataDir().getChildFile ("autosave.json"); }

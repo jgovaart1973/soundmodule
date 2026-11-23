@@ -93,6 +93,8 @@ public:
     /** Last status / error message for the status bar. */
     juce::String getStatusMessage() const { return statusMessage; }
     bool isAudioRunning() const;
+    /** Input + output latency of the audio device, used to line up audio recordings. */
+    int getRoundTripLatencySamples() const;
     int getXRunCount() const;
 
     //== notifications (message thread) =======================================

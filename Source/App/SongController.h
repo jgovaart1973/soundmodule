@@ -21,6 +21,7 @@ class SongController
 {
 public:
     SongController (AppController& app, Sequencer& sequencer);
+    ~SongController();
 
     const Song& getSong() const noexcept { return song; }
 
@@ -63,6 +64,27 @@ public:
     void setClipControls (int track, int clip, const std::vector<SongControl>& controls, const juce::String& what);
     void quantizeClip (int track, int clip, const edit::QuantizeSettings& settings, const std::set<int>& selection);
     const Clip* getClip (int track, int clip) const;
+
+    //== audio tracks ==========================================================
+    int addAudioTrack();
+    void setTrackVolume (int track, float db);
+    void setTrackPan (int track, float pan);
+    void setTrackInput (int track, int input);
+    void setTrackMonitor (int track, bool on);
+    void moveAudioClip (int track, int clip, double newStart);
+    void deleteAudioClip (int track, int clip);
+    void useAudioTake (int track, int clip);
+    /** Place an audio file on a track (track < 0: a new audio track). @returns false + error if unreadable. */
+    bool importAudio (const juce::File& file, int track, double startBeat, juce::String& error);
+    AudioCache& getAudioCache() noexcept { return audioCache; }
+    bool isRecordingAudio() const noexcept { return ! audioRecordings.empty(); }
+
+    //== tempo map =============================================================
+    /** Set the tempo from a beat on (beat <= 0: the start tempo). */
+    void setTempoAt (double beat, double bpm);
+    void removeTempoChange (double beat);
+    /** Called when the audio device restarts (sample rate may have changed). */
+    void audioConfigChanged() { changed (false); }
 
     //== undo ==================================================================
     bool canUndo() const noexcept { return ! undoStack.empty(); }
@@ -128,6 +150,19 @@ private:
     juce::File songFile;
     bool dirty = false;
     bool countIn = true;
+
+    // Audio recording
+    struct ActiveAudioRecording
+    {
+        int track = -1, slot = -1;
+        juce::File file;
+    };
+    void startAudioRecording();
+    void finishAudioRecording();
+    std::vector<ActiveAudioRecording> audioRecordings;
+    bool audioRecordingSeen = false;
+    juce::TimeSliceThread diskThread { "KM disk writer" };
+    AudioCache audioCache;
 
     // Recording session
     std::vector<ActiveTake> takes;

@@ -15,7 +15,7 @@ namespace
         const int barNum = (int) std::floor (beat / bar + 1.0e-9) + 1;
         const double inBar = beat - (barNum - 1) * bar;
         const int beatNum = (int) std::floor (inBar + 1.0e-9) + 1;
-        const double seconds = beat * s.secondsPerBeat();
+        const double seconds = s.beatToSeconds (beat);
         const int minutes = (int) (seconds / 60.0);
         return juce::String::formatted ("Maat %d . %d     %d:%04.1f", barNum, beatNum, minutes, seconds - minutes * 60.0);
     }
@@ -62,7 +62,18 @@ public:
         tempo.setRange (30.0, 300.0, 1.0);
         tempo.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 72, 24);
         tempo.textFromValueFunction = [] (double v) { return juce::String ((int) v) + " BPM"; };
-        tempo.onValueChange = [this] { song.setBpm (tempo.getValue()); };
+        tempo.setTooltip ("Tempo op de afspeelkop. Tempowissels: dubbelklik in het tempospoor onder de liniaal.");
+        tempo.onValueChange = [this]
+        {
+            // Change the tempo segment the playhead is in.
+            const auto& s = song.getSong();
+            const double pos = owner.controller.getEngine().sequencer.getPosition();
+            double segment = 0.0;
+            for (auto& tc : s.tempoChanges)
+                if (tc.beat <= pos + 1.0e-9)
+                    segment = tc.beat;
+            song.setTempoAt (segment, tempo.getValue());
+        };
 
         addAndMakeVisible (metre);
         const char* sigs[] = { "2/4", "3/4", "4/4", "5/4", "6/8", "7/8", "12/8" };
@@ -90,11 +101,25 @@ public:
         };
         addTrackButton.onClick = [this]
         {
-            int part = 0;
-            const auto& perf = owner.controller.getPerformance();
-            for (int p = 0; p < kNumParts; ++p)
-                if (perf.parts[(size_t) p].enabled) { part = p; break; }
-            owner.selectedTrack = song.addTrack (part);
+            juce::PopupMenu m;
+            m.addItem (1, "MIDI-spoor (speelt een part)");
+            m.addItem (2, "Audiospoor (microfoon, gitaar, audiobestanden)");
+            juce::Component::SafePointer<ArrangerComponent> safe (&owner);
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addTrackButton), [safe] (int r)
+            {
+                if (safe == nullptr || r == 0)
+                    return;
+                if (r == 2)
+                {
+                    safe->selectedTrack = safe->song.addAudioTrack();
+                    return;
+                }
+                int part = 0;
+                const auto& perf = safe->controller.getPerformance();
+                for (int p = 0; p < kNumParts; ++p)
+                    if (perf.parts[(size_t) p].enabled) { part = p; break; }
+                safe->selectedTrack = safe->song.addTrack (part);
+            });
         };
         songButton.onClick = [this] { owner.showSongMenu(); };
 
@@ -104,7 +129,8 @@ public:
     void refresh()
     {
         const auto& s = song.getSong();
-        tempo.setValue (s.bpm, juce::dontSendNotification);
+        if (tempo.getThumbBeingDragged() < 0 && ! tempo.isMouseButtonDown (true))
+            tempo.setValue (s.tempoAt (owner.controller.getEngine().sequencer.getPosition()), juce::dontSendNotification);
         metre.setText (juce::String (s.beatsPerBar) + "/" + juce::String (s.beatUnit), juce::dontSendNotification);
         loopButton.setToggleState (s.loopEnabled, juce::dontSendNotification);
         clickButton.setToggleState (song.isMetronomeOn(), juce::dontSendNotification);
@@ -201,6 +227,37 @@ public:
         mute.onClick = [this] { owner.song.setTrackMute (track, mute.getToggleState()); };
         solo.onClick = [this] { owner.song.setTrackSolo (track, solo.getToggleState()); };
         arm.onClick = [this] { owner.song.setTrackArmed (track, arm.getToggleState()); };
+
+        // Audio track controls
+        addChildComponent (inputBox);
+        inputBox.addItem ("In 1+2", 1);
+        inputBox.addItem ("In 1", 2);
+        inputBox.addItem ("In 2", 3);
+        inputBox.setTooltip ("Welke ingang van je audio-interface dit spoor opneemt (stereo of mono)");
+        inputBox.onChange = [this] { owner.song.setTrackInput (track, inputBox.getSelectedId() - 1); };
+        addChildComponent (monitor);
+        monitor.setClickingTogglesState (true);
+        monitor.setColour (juce::TextButton::buttonOnColourId, colours::good.darker (0.3f));
+        monitor.setTooltip ("Meeluisteren: hoor de ingang terwijl het spoor op opnemen staat");
+        monitor.onClick = [this] { owner.song.setTrackMonitor (track, monitor.getToggleState()); };
+        addChildComponent (volume);
+        volume.setSliderStyle (juce::Slider::LinearHorizontal);
+        volume.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        volume.setRange (-60.0, 6.0, 0.1);
+        volume.setSkewFactorFromMidPoint (-12.0);
+        volume.setDoubleClickReturnValue (true, 0.0);
+        volume.setPopupDisplayEnabled (true, true, nullptr);
+        volume.textFromValueFunction = [] (double v) { return juce::String (v, 1) + " dB"; };
+        volume.onDragEnd = [this] { owner.song.setTrackVolume (track, (float) volume.getValue()); };
+        volume.onValueChange = [this] { if (volume.getThumbBeingDragged() < 0) owner.song.setTrackVolume (track, (float) volume.getValue()); };
+        addChildComponent (pan);
+        pan.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        pan.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        pan.setRange (-1.0, 1.0);
+        pan.setDoubleClickReturnValue (true, 0.0);
+        pan.setTooltip ("Pan");
+        pan.onDragEnd = [this] { owner.song.setTrackPan (track, (float) pan.getValue()); };
+
         remove.onClick = [this]
         {
             juce::Component::SafePointer<ArrangerComponent> safe (&owner);
@@ -225,6 +282,19 @@ public:
         mute.setToggleState (tr.mute, juce::dontSendNotification);
         solo.setToggleState (tr.solo, juce::dontSendNotification);
         arm.setToggleState (tr.armed, juce::dontSendNotification);
+
+        const bool audio = tr.isAudio();
+        partBox.setVisible (! audio);
+        for (juce::Component* c : { (juce::Component*) &inputBox, (juce::Component*) &monitor, (juce::Component*) &volume, (juce::Component*) &pan })
+            c->setVisible (audio);
+        inputBox.setSelectedId (tr.input + 1, juce::dontSendNotification);
+        monitor.setToggleState (tr.monitor, juce::dontSendNotification);
+        if (volume.getThumbBeingDragged() < 0)
+            volume.setValue (tr.volumeDb, juce::dontSendNotification);
+        if (pan.getThumbBeingDragged() < 0)
+            pan.setValue (tr.pan, juce::dontSendNotification);
+        arm.setTooltip (audio ? "Opnemen op dit audiospoor (via de gekozen ingang)" : "Opnemen op dit spoor");
+        resized();
         repaint();
     }
 
@@ -242,6 +312,11 @@ public:
         auto r = getLocalBounds().reduced (6, 5);
         auto top = r.removeFromTop (24);
         remove.setBounds (top.removeFromRight (24));
+        if (volume.isVisible())
+        {
+            top.removeFromRight (4);
+            volume.setBounds (top.removeFromRight (96));
+        }
         name.setBounds (top);
         r.removeFromTop (4);
         auto bottom = r.removeFromTop (24);
@@ -251,7 +326,18 @@ public:
         bottom.removeFromRight (3);
         mute.setBounds (bottom.removeFromRight (28));
         bottom.removeFromRight (6);
-        partBox.setBounds (bottom);
+        if (inputBox.isVisible())
+        {
+            pan.setBounds (bottom.removeFromRight (24));
+            bottom.removeFromRight (3);
+            monitor.setBounds (bottom.removeFromRight (40));
+            bottom.removeFromRight (3);
+            inputBox.setBounds (bottom);
+        }
+        else
+        {
+            partBox.setBounds (bottom);
+        }
     }
 
     void paint (juce::Graphics& g) override
@@ -265,8 +351,9 @@ private:
     ArrangerComponent& owner;
     const int track;
     juce::Label name;
-    juce::ComboBox partBox;
-    juce::TextButton mute { "M" }, solo { "S" }, arm { u8 ("\xe2\x97\x8f") }, remove { u8 ("\xc3\x97") };
+    juce::ComboBox partBox, inputBox;
+    juce::TextButton mute { "M" }, solo { "S" }, arm { u8 ("\xe2\x97\x8f") }, remove { u8 ("\xc3\x97") }, monitor { "Mon" };
+    juce::Slider volume, pan;
 };
 
 //==============================================================================
@@ -348,6 +435,100 @@ private:
 };
 
 //==============================================================================
+/** Tempo map under the ruler: drag a segment up/down, double-click to add a change, right-click to remove. */
+class ArrangerComponent::TempoLane final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit TempoLane (ArrangerComponent& o) : owner (o)
+    {
+        setTooltip ("Tempo: sleep omhoog/omlaag, dubbelklik voor een tempowissel op die maat, rechtsklik op een wissel om te verwijderen");
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto& s = owner.song.getSong();
+        g.fillAll (colours::background.brighter (0.03f));
+        g.setColour (colours::outline);
+        g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
+
+        auto yFor = [this] (double bpm) { return (float) juce::jmap (juce::jlimit (40.0, 240.0, bpm), 40.0, 240.0, getHeight() - 4.0, 4.0); };
+
+        std::vector<TempoChange> points { { 0.0, s.bpm } };
+        points.insert (points.end(), s.tempoChanges.begin(), s.tempoChanges.end());
+
+        g.setFont (juce::FontOptions (11.0f));
+        for (size_t i = 0; i < points.size(); ++i)
+        {
+            const float x0 = (float) owner.beatToX (points[i].beat);
+            const float x1 = i + 1 < points.size() ? (float) owner.beatToX (points[i + 1].beat) : (float) getWidth();
+            const float y = yFor (points[i].bpm);
+            g.setColour (colours::warn);
+            g.drawLine (x0, y, x1, y, 1.5f);
+            if (i + 1 < points.size())
+                g.drawLine (x1, y, x1, yFor (points[i + 1].bpm), 1.0f);
+            if (i > 0)
+                g.fillEllipse (x0 - 3.0f, y - 3.0f, 6.0f, 6.0f);
+            g.setColour (colours::text);
+            g.drawText (juce::String (points[i].bpm, juce::exactlyEqual (points[i].bpm, std::floor (points[i].bpm)) ? 0 : 1),
+                        (int) x0 + 4, 0, 60, getHeight(), juce::Justification::centredLeft, false);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto& s = owner.song.getSong();
+        const double beat = juce::jmax (0.0, owner.xToBeat (e.x));
+
+        // Right-click near a change marker: offer to remove it.
+        if (e.mods.isPopupMenu())
+        {
+            for (auto& tc : s.tempoChanges)
+                if (std::abs (owner.beatToX (tc.beat) - e.x) < 8.0)
+                {
+                    juce::PopupMenu m;
+                    m.addItem (1, "Tempowissel verwijderen (" + juce::String (tc.bpm, 0) + " BPM)");
+                    juce::Component::SafePointer<TempoLane> safe (this);
+                    const double at = tc.beat;
+                    m.showMenuAsync (juce::PopupMenu::Options(), [safe, at] (int r)
+                    {
+                        if (safe != nullptr && r == 1)
+                            safe->owner.song.removeTempoChange (at);
+                    });
+                    return;
+                }
+            return;
+        }
+
+        segmentBeat = 0.0;
+        for (auto& tc : s.tempoChanges)
+            if (tc.beat <= beat + 1.0e-9)
+                segmentBeat = tc.beat;
+        startBpm = s.tempoAt (segmentBeat);
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+            return;
+        const double bpm = std::round (juce::jlimit (30.0, 300.0, startBpm - e.getDistanceFromDragStartY() * 0.5));
+        owner.song.setTempoAt (segmentBeat, bpm);   // quick repeats merge into one undo step
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        const auto& s = owner.song.getSong();
+        const double bar = juce::jmax (0.25, s.beatsPerBarAsQuarters());
+        const double at = std::round (juce::jmax (0.0, owner.xToBeat (e.x)) / bar) * bar;
+        if (at > 0.0)
+            owner.song.setTempoAt (at, s.tempoAt (at));
+    }
+
+private:
+    ArrangerComponent& owner;
+    double segmentBeat = 0.0, startBpm = 120.0;
+};
+
+//==============================================================================
 class ArrangerComponent::Lanes final : public juce::Component
 {
 public:
@@ -385,6 +566,10 @@ public:
             const auto& clips = s.tracks[(size_t) t].clips;
             for (int c = 0; c < (int) clips.size(); ++c)
                 drawClip (g, clips[(size_t) c], t, c, y);
+
+            const auto& audioClips = s.tracks[(size_t) t].audioClips;
+            for (int c = 0; c < (int) audioClips.size(); ++c)
+                drawAudioClip (g, s, audioClips[(size_t) c], t, c, y);
         }
 
         const float px = (float) owner.beatToX (owner.controller.getEngine().sequencer.getPosition());
@@ -455,6 +640,63 @@ public:
         g.drawText (label, r.reduced (5.0f, 2.0f).removeFromTop (13.0f), juce::Justification::centredLeft, true);
     }
 
+    void drawAudioClip (juce::Graphics& g, const Song& s, const AudioClip& clip, int t, int c, int y)
+    {
+        double start = clip.start;
+        const int id = c | audioFlag;
+        if (dragging && t == dragTrack && id == dragClip)
+            start = juce::jmax (0.0, owner.snap (clip.start + dragDelta));
+
+        const double startSec = s.beatToSeconds (start);
+        const float x0 = (float) owner.beatToX (start);
+        const float x1 = (float) owner.beatToX (s.secondsToBeat (startSec + clip.duration));
+        if (x1 < 0 || x0 > getWidth())
+            return;
+
+        auto r = juce::Rectangle<float> (x0, (float) y + 3, juce::jmax (3.0f, x1 - x0), (float) laneHeight - 7);
+        const bool selected = t == owner.selectedTrack && id == owner.selectedClip;
+        const auto base = colours::good.darker (0.9f);
+        g.setColour (base.withAlpha (clip.muted ? 0.3f : 0.85f));
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (selected ? colours::text : (clip.muted ? colours::outline : colours::good));
+        g.drawRoundedRectangle (r, 4.0f, selected ? 2.0f : 1.0f);
+
+        // Waveform from the cached overview (one column per pixel).
+        if (auto data = owner.song.getAudioCache().get (juce::File (clip.file), owner.controller.getEngine().sequencer.getSampleRate()))
+        {
+            const auto wave = r.reduced (2.0f, 14.0f).withTrimmedBottom (-10.0f);
+            const float mid = wave.getCentreY();
+            g.setColour ((clip.muted ? colours::textDim : colours::good.brighter (0.4f)).withAlpha (0.9f));
+            const double sr = data->sampleRate;
+            const int firstPx = (int) juce::jmax (0.0f, x0), lastPx = (int) juce::jmin ((float) getWidth(), x1);
+            for (int px = firstPx; px < lastPx; ++px)
+            {
+                const double secA = s.beatToSeconds (owner.xToBeat (px)) - startSec + clip.offset;
+                const double secB = s.beatToSeconds (owner.xToBeat (px + 1)) - startSec + clip.offset;
+                const int pa = juce::jmax (0, (int) (secA * sr) / AudioFileData::peakBlock);
+                const int pb = juce::jmin ((int) data->peaks.size(), (int) (secB * sr) / AudioFileData::peakBlock + 1);
+                float peak = 0.0f;
+                for (int i = pa; i < pb; ++i)
+                    peak = juce::jmax (peak, data->peaks[(size_t) i]);
+                const float h = juce::jmin (1.0f, peak) * wave.getHeight() * 0.5f;
+                g.drawVerticalLine (px, mid - h, mid + h + 1.0f);
+            }
+        }
+        else
+        {
+            g.setColour (colours::danger);
+            g.setFont (juce::FontOptions (11.0f));
+            g.drawText ("Bestand ontbreekt", r.reduced (5.0f), juce::Justification::centred, true);
+        }
+
+        g.setColour (clip.muted ? colours::textDim : colours::text);
+        g.setFont (juce::FontOptions (11.0f));
+        auto label = clip.name.isNotEmpty() ? clip.name : juce::File (clip.file).getFileNameWithoutExtension();
+        if (clip.muted)
+            label << "  (uit)";
+        g.drawText (label, r.reduced (5.0f, 2.0f).removeFromTop (13.0f), juce::Justification::centredLeft, true);
+    }
+
     bool hitClip (juce::Point<int> p, int& track, int& clip) const
     {
         const auto& s = owner.song.getSong();
@@ -463,6 +705,23 @@ public:
         if (! juce::isPositiveAndBelow (track, (int) s.tracks.size()))
             return false;
         const double beat = owner.xToBeat (p.x);
+
+        if (s.tracks[(size_t) track].isAudio())
+        {
+            const auto& audio = s.tracks[(size_t) track].audioClips;
+            for (int pass = 0; pass < 2 && clip < 0; ++pass)
+                for (int c = (int) audio.size() - 1; c >= 0; --c)
+                {
+                    const auto& a = audio[(size_t) c];
+                    if (beat >= a.start && beat < s.audioClipEndBeat (a) && a.muted == (pass == 1))
+                    {
+                        clip = c | audioFlag;
+                        break;
+                    }
+                }
+            return clip >= 0;
+        }
+
         const auto& clips = s.tracks[(size_t) track].clips;
         // Prefer audible clips over muted takes underneath them.
         for (int pass = 0; pass < 2 && clip < 0; ++pass)
@@ -515,7 +774,13 @@ public:
 
     void mouseUp (const juce::MouseEvent&) override
     {
-        if (dragging && dragClip >= 0)
+        if (dragging && dragClip >= audioFlag)
+        {
+            const int c = dragClip & ~audioFlag;
+            const auto& clip = owner.song.getSong().tracks[(size_t) dragTrack].audioClips[(size_t) c];
+            owner.song.moveAudioClip (dragTrack, c, juce::jmax (0.0, owner.snap (clip.start + dragDelta)));
+        }
+        else if (dragging && dragClip >= 0)
         {
             const auto& clip = owner.song.getSong().tracks[(size_t) dragTrack].clips[(size_t) dragClip];
             owner.song.moveClip (dragTrack, dragClip, juce::jmax (0.0, owner.snap (clip.start + dragDelta)));
@@ -527,6 +792,26 @@ public:
 
     void showClipMenu (int t, int c)
     {
+        if (c >= audioFlag)
+        {
+            const int ac = c & ~audioFlag;
+            const auto& clip = owner.song.getSong().tracks[(size_t) t].audioClips[(size_t) ac];
+            juce::PopupMenu m;
+            m.addItem (1, "Deze take gebruiken", clip.muted);
+            m.addItem (2, "Audioclip verwijderen");
+            m.addItem (3, "Toon bestand in Verkenner");
+            juce::Component::SafePointer<Lanes> safe (this);
+            const auto file = juce::File (clip.file);
+            m.showMenuAsync (juce::PopupMenu::Options(), [safe, t, ac, file] (int r)
+            {
+                if (safe == nullptr) return;
+                if (r == 1) safe->owner.song.useAudioTake (t, ac);
+                if (r == 2) { safe->owner.song.deleteAudioClip (t, ac); safe->owner.selectedClip = -1; }
+                if (r == 3) file.revealToUser();
+            });
+            return;
+        }
+
         const auto& clips = owner.song.getSong().tracks[(size_t) t].clips;
         const auto& clip = clips[(size_t) c];
         juce::PopupMenu m, takeMenu;
@@ -562,9 +847,12 @@ public:
         int t = -1, c = -1;
         if (hitClip (e.getPosition(), t, c))
         {
-            owner.openEditor (t, c);
+            if (c < audioFlag)
+                owner.openEditor (t, c);
             return;
         }
+        if (juce::isPositiveAndBelow (t, (int) owner.song.getSong().tracks.size()) && owner.song.getSong().tracks[(size_t) t].isAudio())
+            return; // audio tracks get their clips from recording or importing
         // Empty spot on a track: a new one-bar clip, opened straight away.
         if (juce::isPositiveAndBelow (t, (int) owner.song.getSong().tracks.size()))
         {
@@ -614,6 +902,8 @@ ArrangerComponent::ArrangerComponent (AppController& c)
     setWantsKeyboardFocus (true);
     transport = std::make_unique<TransportBar> (*this);
     ruler = std::make_unique<Ruler> (*this);
+    tempoLane = std::make_unique<TempoLane> (*this);
+    addAndMakeVisible (*tempoLane);
     lanes = std::make_unique<Lanes> (*this);
 
     addAndMakeVisible (*transport);
@@ -664,6 +954,7 @@ void ArrangerComponent::refresh()
     if (! juce::isPositiveAndBelow (selectedTrack, (int) song.getSong().tracks.size()))
         selectedTrack = -1;
     transport->refresh();
+    tempoLane->repaint();
     if (pianoRoll->isVisible())
         pianoRoll->reloadFromSong();
     updateScrollRange();
@@ -690,6 +981,7 @@ void ArrangerComponent::updateScrollRange()
 void ArrangerComponent::scrollBarMoved (juce::ScrollBar*, double start)
 {
     scrollBeat = juce::jmax (0.0, start);
+    tempoLane->repaint();
     ruler->repaint();
     lanes->repaint();
 }
@@ -728,6 +1020,7 @@ void ArrangerComponent::resized()
         pianoRoll->setBounds (r.removeFromBottom (juce::jmax (330, (int) (r.getHeight() * 0.55f))));
     hScroll.setBounds (r.removeFromBottom (14).withTrimmedLeft (headerWidth));
     ruler->setBounds (r.removeFromTop (rulerHeight).withTrimmedLeft (headerWidth));
+    tempoLane->setBounds (r.removeFromTop (tempoHeight).withTrimmedLeft (headerWidth));
     bodyViewport.setBounds (r);
 
     const int lanesHeight = juce::jmax (r.getHeight(), (int) song.getSong().tracks.size() * laneHeight);
@@ -743,7 +1036,10 @@ void ArrangerComponent::paint (juce::Graphics& g)
 {
     g.fillAll (colours::background);
     g.setColour (colours::panel);
-    g.fillRect (0, 54, headerWidth, rulerHeight);
+    g.fillRect (0, 54, headerWidth, rulerHeight + tempoHeight);
+    g.setColour (colours::textDim);
+    g.setFont (juce::FontOptions (12.0f));
+    g.drawText ("Tempo (BPM)", 10, 54 + rulerHeight, headerWidth - 20, tempoHeight, juce::Justification::centredLeft);
 }
 
 bool ArrangerComponent::keyPressed (const juce::KeyPress& key)
@@ -757,12 +1053,18 @@ bool ArrangerComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
     if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'Y' || key.getKeyCode() == 'y')) { song.redo(); return true; }
-    if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'D' || key.getKeyCode() == 'd') && selectedClip >= 0)
+    if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'D' || key.getKeyCode() == 'd') && selectedClip >= 0 && selectedClip < audioFlag)
     {
         selectedClip = song.duplicateClip (selectedTrack, selectedClip);
         return true;
     }
-    if (key == juce::KeyPress::returnKey && selectedClip >= 0) { openEditor (selectedTrack, selectedClip); return true; }
+    if (key == juce::KeyPress::returnKey && selectedClip >= 0 && selectedClip < audioFlag) { openEditor (selectedTrack, selectedClip); return true; }
+    if ((key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) && selectedClip >= audioFlag)
+    {
+        song.deleteAudioClip (selectedTrack, selectedClip & ~audioFlag);
+        selectedClip = -1;
+        return true;
+    }
     if ((key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey) && selectedClip >= 0)
     {
         song.deleteClip (selectedTrack, selectedClip);
@@ -799,6 +1101,7 @@ void ArrangerComponent::showSongMenu()
     m.addItem (4, "Opslaan als...");
     m.addSeparator();
     m.addItem (5, "MIDI-bestand importeren...");
+    m.addItem (8, "Audiobestand importeren (WAV, FLAC, AIFF, MP3)...");
     m.addItem (6, "Exporteren als MIDI-bestand...");
     m.addItem (7, "Exporteren als audio (WAV of FLAC)...");
 
@@ -839,6 +1142,20 @@ void ArrangerComponent::showSongMenu()
                             if (! s.exportAudio (file, error) && s.onStatus)
                                 s.onStatus ("Export mislukt: " + error);
                         });
+                    });
+                    break;
+            case 8: self.chooseFile ("Audiobestand importeren", "*.wav;*.flac;*.aif;*.aiff;*.mp3;*.ogg", false, [safe] (const juce::File& f)
+                    {
+                        if (safe == nullptr) return;
+                        auto& me = *safe;
+                        const auto& current = me.song.getSong();
+                        const double bar = juce::jmax (0.25, current.beatsPerBarAsQuarters());
+                        const double at = std::floor (me.controller.getEngine().sequencer.getPosition() / bar) * bar;
+                        const int target = juce::isPositiveAndBelow (me.selectedTrack, (int) current.tracks.size())
+                                           && current.tracks[(size_t) me.selectedTrack].isAudio() ? me.selectedTrack : -1;
+                        juce::String error;
+                        if (! me.song.importAudio (f, target, at, error) && me.song.onStatus)
+                            me.song.onStatus (error);
                     });
                     break;
             default: break;

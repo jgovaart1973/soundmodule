@@ -2,7 +2,8 @@
 
 Een Windows x64-programma dat je pc verandert in een hoogwaardige **klankmodule voor MIDI-apparaten**.
 Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule), **fase 2a**
-(opnemen en arrangeren) en **fase 2b** (noten bewerken in de pianorol, ongedaan maken).
+(opnemen en arrangeren), **fase 2b** (pianorol, ongedaan maken) en **fase 3a** (audiosporen en
+tempowisselingen).
 
 ## Wat het nu kan (fase 1)
 
@@ -59,6 +60,30 @@ maakt een nieuwe clip van één maat en opent die.
 | Ongedaan maken | Ctrl+Z, opnieuw Ctrl+Y (of de pijlen in de transportbalk). Werkt voor alles in het nummer, ook opnames |
 
 In de Arranger dupliceert Ctrl+D de gekozen clip; Enter opent hem in de pianorol.
+
+## Audiosporen (fase 3a)
+Kies **+ Spoor > Audiospoor**. Een audiospoor neemt op via je audio-interface (microfoon, gitaar, line-in).
+
+| Wat | Hoe |
+| --- | --- |
+| Ingang kiezen | In het spoor: *In 1+2* (stereo), *In 1* of *In 2* (mono). Welke fysieke ingangen dat zijn, kies je in *Instellingen > Audio* |
+| Opnemen | Zet ● van het spoor aan en druk op opnemen. Het bestand komt in `Documenten\KlankModule\Recordings` (WAV, 24 bit) |
+| Meeluisteren | **Mon** aan: je hoort de ingang terwijl het spoor op opnemen staat (gebruik ASIO voor de kleinste vertraging) |
+| Vertraging | Wordt automatisch gecorrigeerd: de opname staat precies gelijk met wat je hoorde |
+| Takes | Opnieuw opnemen over dezelfde plek: de oude opname blijft bewaard (uit). Rechtsklik > *Deze take gebruiken* |
+| Importeren | *Nummer... > Audiobestand importeren* (WAV, FLAC, AIFF, MP3). Komt op het gekozen audiospoor, op de maat van de afspeelkop |
+| Mixen | Volume (schuif) en pan (knopje) per spoor; M en S zoals bij MIDI-sporen |
+| Export | *Exporteren als audio* neemt audiosporen mee |
+
+Audio speelt op zijn eigen snelheid: een tempowissel verandert de plaats van een audioclip niet in seconden.
+Opnemen met loop aan stopt de audio-opname bij het einde van de loop (één take).
+
+## Tempowisselingen (fase 3a)
+Onder de liniaal staat het **tempospoor**.
+- Sleep een stuk omhoog of omlaag om het tempo daar te veranderen.
+- Dubbelklik op een maat om daar een tempowissel te maken; rechtsklik op het bolletje om hem te verwijderen.
+- Het tempoveld in de transportbalk toont en verandert het tempo op de afspeelkop.
+- Afspelen, opnemen, metronoom, export en MIDI-bestanden (import en export) volgen de tempowisselingen.
 
 Een geïmporteerd MIDI-bestand krijgt per kanaal een spoor op de part met hetzelfde nummer.
 Parts zonder klank krijgen automatisch een passende ingebouwde klank.
@@ -148,7 +173,9 @@ Zonder `--midi` speelt het een korte demo. Handig om klanken te vergelijken of f
 - MIDI loopt via de standaard Windows-MIDI-API. Op Windows 11 gaat dat automatisch via Windows MIDI
   Services (meerdere apps tegelijk op één keyboard). Echte MIDI 2.0-functies volgen in fase 3.
 - MIDI-uitgang naar hardware-synths, SysEx en MIDI-clock volgen in fase 3.
-- Audiosporen (microfoon/gitaar opnemen) zitten nog niet in fase 2a; tempo is vast per nummer.
+- Audioclips inkorten (trimmen) en tijdrekken volgen later. Geleidelijke tempoveranderingen (accelerando) ook.
+- Nog te doen in fase 3: drum-editor, arpeggiator en akkoordspoor (3b), notenbalk en MIDI-uitgang naar hardware (3c),
+  MIDI 2.0 en CLAP-plug-ins (3d).
 - Niet-opgeslagen wijzigingen van een performance vervallen als je naar een andere performance wisselt
   (wel bewaard bij afsluiten via de autosave). Sla op voor je wisselt.
 

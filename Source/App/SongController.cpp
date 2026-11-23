@@ -20,8 +20,16 @@ namespace
 
 SongController::SongController (AppController& a, Sequencer& s) : app (a), sequencer (s)
 {
+    diskThread.startThread (juce::Thread::Priority::high);
     syncTransport();
-    sequencer.setSnapshot (PlaybackSnapshot::build (song));
+    sequencer.setSnapshot (PlaybackSnapshot::build (song, &audioCache, sequencer.getSampleRate()));
+}
+
+SongController::~SongController()
+{
+    if (! audioRecordings.empty())
+        finishAudioRecording();
+    diskThread.stopThread (3000);
 }
 
 void SongController::setStatus (const juce::String& message)
@@ -47,18 +55,8 @@ void SongController::changed (bool markDirty)
     syncTransport();
 
     // While recording, armed tracks stay silent so you do not hear the old take doubled.
-    if (takesOpen)
-    {
-        Song playing = song;
-        for (auto& t : playing.tracks)
-            if (t.armed)
-                t.mute = true;
-        sequencer.setSnapshot (PlaybackSnapshot::build (playing));
-    }
-    else
-    {
-        sequencer.setSnapshot (PlaybackSnapshot::build (song));
-    }
+    sequencer.setSnapshot (PlaybackSnapshot::build (song, &audioCache, sequencer.getSampleRate(),
+                                                    takesOpen || ! audioRecordings.empty()));
 
     if (onSongChanged)
         onSongChanged();
@@ -87,7 +85,7 @@ void SongController::record()
         return;
     }
 
-    // Nothing armed: arm a track for every part that is switched on (creating tracks as needed),
+    // Nothing armed: arm a MIDI track for every part that is switched on (creating tracks as needed),
     // so a split or layer records each sound on its own track.
     bool anyArmed = false;
     for (auto& t : song.tracks)
@@ -102,7 +100,7 @@ void SongController::record()
                 continue;
             int found = -1;
             for (int t = 0; t < (int) song.tracks.size() && found < 0; ++t)
-                if (song.tracks[(size_t) t].part == p)
+                if (! song.tracks[(size_t) t].isAudio() && song.tracks[(size_t) t].part == p)
                     found = t;
             if (found < 0)
                 found = addTrack (p);
@@ -111,6 +109,7 @@ void SongController::record()
         changed();
     }
 
+    startAudioRecording();
     sequencer.record (countIn && ! sequencer.isRolling());
     setStatus (countIn && ! sequencer.isRolling() ? "Aftellen... daarna opnemen." : "Opnemen.");
 }
@@ -440,7 +439,7 @@ void SongController::openTakes (double startBeat, int number)
     takes.clear();
     for (int t = 0; t < (int) song.tracks.size(); ++t)
     {
-        if (! song.tracks[(size_t) t].armed)
+        if (! song.tracks[(size_t) t].armed || song.tracks[(size_t) t].isAudio())
             continue;
         ActiveTake take;
         take.track = t;
@@ -488,6 +487,15 @@ void SongController::commitTakes (double endBeat, bool loopTake)
 void SongController::tick()
 {
     sequencer.collectGarbage();
+
+    // Audio recording ends when record is switched off (stop or punch-out).
+    if (! audioRecordings.empty())
+    {
+        if (sequencer.isRecording())
+            audioRecordingSeen = true;
+        else if (audioRecordingSeen)
+            finishAudioRecording();
+    }
 
     const bool recordingNow = sequencer.isRecording() && sequencer.isPlaying();
     if (recordingNow && ! takesOpen)
@@ -581,7 +589,8 @@ bool SongController::captureRecentPlaying()
 
     pushUndo ("Vastleggen");
     const int64_t t0 = history[first].sampleTime;
-    const double beatsPerSample = song.bpm / 60.0 / sr;
+    const double start0 = floorToBar (song, sequencer.isRolling() ? song.getEndBeat() : sequencer.getPosition());
+    const double beatsPerSample = song.tempoAt (start0) / 60.0 / sr;
     const double start = floorToBar (song, sequencer.isRolling() ? song.getEndBeat() : sequencer.getPosition());
 
     std::map<int, ActiveTake> perPart;
@@ -603,7 +612,7 @@ bool SongController::captureRecentPlaying()
 
         int track = -1;
         for (int t = 0; t < (int) song.tracks.size() && track < 0; ++t)
-            if (song.tracks[(size_t) t].part == part)
+            if (! song.tracks[(size_t) t].isAudio() && song.tracks[(size_t) t].part == part)
                 track = t;
         if (track < 0)
             track = addTrack (part);
@@ -692,6 +701,8 @@ void SongController::writeAutosave()
 
 void SongController::finishRecording()
 {
+    if (! audioRecordings.empty())
+        finishAudioRecording();
     if (! takesOpen)
         return;
     double end = sequencer.getPosition();
@@ -768,27 +779,17 @@ int SongController::importMidi (const juce::File& file, juce::String& error)
 bool SongController::exportAudio (const juce::File& file, juce::String& error)
 {
     const double sr = sequencer.getSampleRate() > 0 ? sequencer.getSampleRate() : 48000.0;
-    auto snapshot = PlaybackSnapshot::build (song);
-    if (snapshot->events.empty())
+    if (song.getEndBeat() <= 0.0)
     {
         error = "Het nummer is leeg.";
         return false;
     }
 
-    std::vector<std::pair<int64_t, MidiEvent>> events;
-    events.reserve (snapshot->events.size());
-    const double samplesPerBeat = sr * song.secondsPerBeat();
-    for (auto& e : snapshot->events)
-    {
-        MidiEvent m = MidiEvent::make (-1, e.data[0], e.data[1], e.data[2], e.size);
-        m.targetPart = e.part;
-        events.push_back ({ (int64_t) std::llround (e.beat * samplesPerBeat), m });
-    }
-
+    // Render the whole song (MIDI, audio tracks, tempo changes, effects) through a private engine.
     OfflineRenderer renderer (sr, 512);
     juce::String loadError;
     renderer.loadPerformance (app.capturePerformance(), loadError);
-    const auto audio = renderer.renderEvents (events, (int64_t) std::ceil ((song.getEndBeat() * song.secondsPerBeat() + 3.0) * sr));
+    const auto audio = renderer.renderSong (song, audioCache, 3.0);
 
     const bool flac = file.hasFileExtension ("flac");
     if (! OfflineRenderer::writeAudioFile (audio, sr, file, flac))
@@ -798,6 +799,241 @@ bool SongController::exportAudio (const juce::File& file, juce::String& error)
     }
     setStatus (juce::String::fromUTF8 ("Geëxporteerd: ") + file.getFileName() + (loadError.isNotEmpty() ? " (let op: " + loadError.trim() + ")" : juce::String()));
     return true;
+}
+
+//==============================================================================
+void SongController::setTempoAt (double beat, double bpm)
+{
+    pushUndo ("Tempo");
+    song.setTempoAt (beat, bpm);
+    changed();
+}
+
+void SongController::removeTempoChange (double beat)
+{
+    pushUndo ("Tempowissel verwijderen");
+    song.removeTempoChange (beat);
+    changed();
+}
+
+//==============================================================================
+int SongController::addAudioTrack()
+{
+    pushUndo ("Audiospoor toevoegen");
+    Track t;
+    t.kind = Track::Kind::audio;
+    int count = 1;
+    for (auto& other : song.tracks)
+        if (other.isAudio())
+            ++count;
+    t.name = "Audio " + juce::String (count);
+    song.tracks.push_back (t);
+    changed();
+    return (int) song.tracks.size() - 1;
+}
+
+void SongController::setTrackVolume (int track, float db)
+{
+    if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+    {
+        pushUndo ("Spoorvolume");
+        song.tracks[(size_t) track].volumeDb = juce::jlimit (-80.0f, 12.0f, db);
+        changed();
+    }
+}
+
+void SongController::setTrackPan (int track, float pan)
+{
+    if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+    {
+        pushUndo ("Spoorpan");
+        song.tracks[(size_t) track].pan = juce::jlimit (-1.0f, 1.0f, pan);
+        changed();
+    }
+}
+
+void SongController::setTrackInput (int track, int input)
+{
+    if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+    {
+        song.tracks[(size_t) track].input = juce::jlimit (0, 2, input);
+        changed();
+    }
+}
+
+void SongController::setTrackMonitor (int track, bool on)
+{
+    if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+    {
+        song.tracks[(size_t) track].monitor = on;
+        changed (false);
+    }
+}
+
+void SongController::moveAudioClip (int track, int clip, double newStart)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+        return;
+    auto& clips = song.tracks[(size_t) track].audioClips;
+    if (juce::isPositiveAndBelow (clip, (int) clips.size()))
+    {
+        pushUndo ("Audioclip verplaatsen");
+        clips[(size_t) clip].start = juce::jmax (0.0, newStart);
+        changed();
+    }
+}
+
+void SongController::deleteAudioClip (int track, int clip)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+        return;
+    auto& clips = song.tracks[(size_t) track].audioClips;
+    if (juce::isPositiveAndBelow (clip, (int) clips.size()))
+    {
+        pushUndo ("Audioclip verwijderen");
+        clips.erase (clips.begin() + clip);
+        changed();
+    }
+}
+
+void SongController::useAudioTake (int track, int clip)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+        return;
+    auto& clips = song.tracks[(size_t) track].audioClips;
+    if (! juce::isPositiveAndBelow (clip, (int) clips.size()))
+        return;
+
+    pushUndo ("Take kiezen");
+    const double s0 = song.beatToSeconds (clips[(size_t) clip].start);
+    const double e0 = s0 + clips[(size_t) clip].duration;
+    for (size_t i = 0; i < clips.size(); ++i)
+    {
+        const double s1 = song.beatToSeconds (clips[i].start), e1 = s1 + clips[i].duration;
+        if ((int) i == clip)            clips[i].muted = false;
+        else if (s1 < e0 && s0 < e1)    clips[i].muted = true;
+    }
+    changed();
+}
+
+bool SongController::importAudio (const juce::File& file, int track, double startBeat, juce::String& error)
+{
+    auto data = audioCache.get (file, sequencer.getSampleRate(), &error);
+    if (data == nullptr)
+        return false;
+
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()) || ! song.tracks[(size_t) track].isAudio())
+        track = addAudioTrack();
+
+    pushUndo ("Audio importeren");
+    AudioClip clip;
+    clip.name = file.getFileNameWithoutExtension();
+    clip.file = file.getFullPathName();
+    clip.start = juce::jmax (0.0, startBeat);
+    clip.duration = data->durationSeconds();
+    song.tracks[(size_t) track].audioClips.push_back (clip);
+    changed();
+    setStatus ("Audio geplaatst: " + file.getFileName());
+    return true;
+}
+
+void SongController::startAudioRecording()
+{
+    if (! audioRecordings.empty())
+        return;
+
+    const double sr = sequencer.getSampleRate();
+    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H.%M.%S");
+
+    for (int t = 0; t < (int) song.tracks.size(); ++t)
+    {
+        const auto& track = song.tracks[(size_t) t];
+        if (! track.isAudio() || ! track.armed)
+            continue;
+
+        const auto file = paths::recordingsDir().getNonexistentChildFile (
+            juce::File::createLegalFileName (song.name + " - " + track.name + " - " + stamp), ".wav", false);
+
+        auto stream = std::unique_ptr<juce::OutputStream> (file.createOutputStream());
+        if (stream == nullptr)
+        {
+            setStatus ("Kan niet opnemen naar " + file.getFullPathName());
+            continue;
+        }
+
+        juce::WavAudioFormat wav;
+        const auto options = juce::AudioFormatWriterOptions{}.withSampleRate (sr)
+                                                             .withNumChannels (track.input == 0 ? 2 : 1)
+                                                             .withBitsPerSample (24);
+        auto writer = wav.createWriterFor (stream, options);
+        if (writer == nullptr)
+            continue;
+
+        // A background thread empties a lock-free buffer of ~8 s to disk.
+        auto threaded = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), diskThread, (int) (sr * 8));
+        const int slot = sequencer.attachRecorder (std::move (threaded), track.input);
+        if (slot >= 0)
+            audioRecordings.push_back ({ t, slot, file });
+    }
+
+    audioRecordingSeen = false;
+    if (! audioRecordings.empty())
+        changed (false); // armed audio tracks go silent while they are re-recorded
+}
+
+void SongController::finishAudioRecording()
+{
+    const double sr = sequencer.getSampleRate();
+    const double latency = app.getRoundTripLatencySamples() / sr;
+    bool undoPushed = false;
+
+    for (auto& rec : audioRecordings)
+    {
+        auto result = sequencer.detachRecorder (rec.slot);
+        result.writer.reset();   // flushes the rest of the buffer and closes the file
+
+        const double recorded = result.samplesWritten / sr;
+        if (result.startBeat < 0.0 || recorded - latency < 0.05 || ! juce::isPositiveAndBelow (rec.track, (int) song.tracks.size()))
+        {
+            rec.file.deleteFile();
+            continue;
+        }
+
+        if (! undoPushed)
+        {
+            pushUndo ("Audio-opname");
+            undoPushed = true;
+        }
+
+        AudioClip clip;
+        clip.file = rec.file.getFullPathName();
+        clip.start = result.startBeat;
+        clip.offset = latency;          // the input arrives this much later than what you heard
+        clip.duration = recorded - latency;
+
+        auto& clips = song.tracks[(size_t) rec.track].audioClips;
+        const double newStart = song.beatToSeconds (clip.start);
+        int takeNo = 1;
+        for (auto& other : clips)
+        {
+            const double os = song.beatToSeconds (other.start);
+            if (os < newStart + clip.duration && newStart < os + other.duration)
+            {
+                other.muted = true;     // older take underneath stays available
+                takeNo = juce::jmax (takeNo, other.take + 1);
+            }
+        }
+        clip.take = takeNo;
+        clip.name = "Opname " + juce::String (takeNo);
+        audioCache.invalidate (rec.file);
+        clips.push_back (clip);
+    }
+
+    audioRecordings.clear();
+    audioRecordingSeen = false;
+    if (undoPushed)
+        setStatus ("Audio-opname bewaard.");
+    changed (undoPushed);
 }
 
 } // namespace km

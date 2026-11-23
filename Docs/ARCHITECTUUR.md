@@ -73,3 +73,14 @@ De audio-thread wacht nooit en alloceert niets:
   herhalingen van hetzelfde (tempo slepen) worden samengevoegd.
 - Voorbeluisteren gaat via `AppController::previewNote`: een event met `targetPart` in de live-wachtrij,
   dus nooit opgenomen.
+
+## Audiosporen en tempo (fase 3a)
+- `Song` heeft een tempokaart (`tempoChanges`) met `beatToSeconds` / `secondsToBeat`. De `PlaybackSnapshot`
+  krijgt een kopie; de sequencer neemt het tempo aan het begin van elk blok.
+- `AudioCache` laadt audiobestanden in het geheugen op de samplerate van de geluidskaart (eenmalig
+  omgezet) en maakt een golfvormoverzicht. De snapshot houdt de buffers vast met `shared_ptr`; vrijgeven
+  gebeurt pas op de message-thread.
+- `Sequencer::processAudio` speelt audioclips (in seconden), mengt meeluister-ingangen en schrijft
+  opnames naar een `AudioFormatWriter::ThreadedWriter` (lock-free buffer, schijf-thread schrijft weg).
+- Bij het afronden wordt de clip verschoven met de in+uit-latentie van de geluidskaart.
+- Export speelt het hele nummer via een eigen engine + sequencer (`OfflineRenderer::renderSong`).

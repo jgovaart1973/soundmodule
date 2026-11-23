@@ -13,6 +13,7 @@ juce::File userDir();           ///< Documents\KlankModule
 juce::File performancesDir();   ///< Documents\KlankModule\Performances
 juce::File soundsDir();         ///< Documents\KlankModule\Sounds
 juce::File songsDir();          ///< Documents\KlankModule\Songs
+juce::File recordingsDir();     ///< Documents\KlankModule\Recordings (audio takes)
 juce::File songAutosaveFile();
 
 juce::File autosaveFile();

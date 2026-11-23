@@ -32,6 +32,7 @@ private:
     class TrackHeader;
     class Ruler;
     class Lanes;
+    class TempoLane;
 
     void timerCallback() override;
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
@@ -52,6 +53,7 @@ private:
     std::unique_ptr<TransportBar> transport;
     std::unique_ptr<Ruler> ruler;
     std::unique_ptr<Lanes> lanes;
+    std::unique_ptr<TempoLane> tempoLane;
     juce::Viewport bodyViewport;
     juce::Component body;
     juce::OwnedArray<TrackHeader> headers;
@@ -64,9 +66,11 @@ private:
     int selectedTrack = -1, selectedClip = -1;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
+    static constexpr int audioFlag = 1 << 20;   ///< selectedClip >= audioFlag: an audio clip
     static constexpr int headerWidth = 250;
     static constexpr int laneHeight = 64;
     static constexpr int rulerHeight = 26;
+    static constexpr int tempoHeight = 30;
 };
 
 } // namespace km

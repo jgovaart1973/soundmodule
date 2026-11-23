@@ -38,12 +38,44 @@ struct Clip
     double end() const noexcept { return start + length; }
 };
 
+/** A recorded or imported audio file placed on an audio track. */
+struct AudioClip
+{
+    juce::String name;
+    juce::String file;          ///< absolute path (WAV, FLAC, AIFF, MP3...)
+    double start = 0.0;         ///< beat position in the song
+    double offset = 0.0;        ///< seconds skipped at the start of the file (trim / latency correction)
+    double duration = 0.0;      ///< seconds played from the file
+    float gainDb = 0.0f;
+    bool muted = false;
+    int take = 1;
+};
+
 struct Track
 {
+    enum class Kind { midi, audio };
+
     juce::String name { "Spoor" };
-    int part = 0;          ///< 0..15: which part (sound) plays this track
+    Kind kind = Kind::midi;
+    int part = 0;          ///< MIDI tracks: 0..15, which part (sound) plays this track
     bool mute = false, solo = false, armed = false;
     std::vector<Clip> clips;
+
+    // Audio tracks
+    std::vector<AudioClip> audioClips;
+    float volumeDb = 0.0f;
+    float pan = 0.0f;
+    int input = 0;          ///< 0 = inputs 1+2 (stereo), 1 = input 1 (mono), 2 = input 2 (mono)
+    bool monitor = false;   ///< hear the input while armed
+
+    bool isAudio() const noexcept { return kind == Kind::audio; }
+};
+
+/** Tempo from this beat on (step change). */
+struct TempoChange
+{
+    double beat = 0.0;
+    double bpm = 120.0;
 };
 
 /** A song: tempo, metre, loop range, tracks and the sounds (performance) it was made with. */
@@ -58,11 +90,21 @@ struct Song
     bool loopEnabled = false;
     double loopStart = 0.0, loopEnd = 16.0;
     std::vector<Track> tracks;
+    std::vector<TempoChange> tempoChanges;   ///< sorted by beat, all > 0; 'bpm' is the tempo at the start
     Performance performance;
 
     double beatsPerBarAsQuarters() const noexcept { return beatsPerBar * 4.0 / beatUnit; }
     double secondsPerBeat() const noexcept        { return 60.0 / bpm; }
     double getEndBeat() const;
+
+    //== tempo map ==============================================================
+    double tempoAt (double beat) const noexcept;
+    double beatToSeconds (double beat) const noexcept;
+    double secondsToBeat (double seconds) const noexcept;
+    /** Add or replace a tempo change (beat <= 0 sets the start tempo). */
+    void setTempoAt (double beat, double bpm);
+    void removeTempoChange (double beat);
+    double audioClipEndBeat (const AudioClip& c) const noexcept { return secondsToBeat (beatToSeconds (c.start) + c.duration); }
 
     juce::String toJson() const;
     bool fromJson (const juce::String& json, juce::String& error);

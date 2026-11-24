@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/AppController.h"
+#include "UI/ScoreView.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <set>
@@ -100,7 +101,9 @@ private:
     juce::ToggleButton snapButton { "Raster" }, lengthsButton { "Ook lengtes" };
     juce::Slider strength, swing;
     juce::Label strengthLabel, swingLabel;
-    juce::TextButton drumsButton { "Drums" };
+    juce::TextButton drumsButton { "Drums" }, scoreButton { "Notenbalk" };
+    ScoreView score;
+    void updateScore();
     juce::TextButton quantizeButton { "Quantize (Q)" }, octDown { "-12" }, semiDown { "-1" }, semiUp { "+1" },
                      octUp { "+12" }, closeButton { "Sluiten" };
     juce::ScrollBar hScroll { false }, vScroll { true };

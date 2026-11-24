@@ -98,3 +98,30 @@ De audio-thread wacht nooit en alloceert niets:
   (lengte x velocity, basnoot extra), per maat samengevoegd, voicing rond C4 en begeleiding.
 - `Song.chords` (JSON `chords`: [beat, lengte, grondtoon, soort]) en `Track.drums`; alle wijzigingen via
   `SongController` en dus ongedaan te maken.
+
+## Notenbalk en MIDI-uit (fase 3c)
+- `Model/Notation.h` (pure functies, getest): spelling per toonsoort, toonsoort raden (Krumhansl-Kessler),
+  per notenbalk één stem: kwantiseren voor weergave, akkoorden samenvoegen, rusten vullen, knippen op
+  maatstrepen, notenwaarden kiezen die op de tel beginnen (met punten en overbindingen), voortekens per
+  maat, waardestrepen per tel. `UI/ScoreView` tekent alleen het resultaat (glyphs uit Segoe UI Symbol /
+  FreeSerif, de rest met paden) en kan een PNG maken.
+- `Midi/MidiOutHub`: de audio-thread zet korte MIDI-berichten met een tijdstempel (blokstart + positie +
+  uitgangslatentie + eigen correctie) in een lock-free wachtrij; een eigen thread met hoge prioriteit
+  verstuurt ze op tijd. De bloktijd volgt de sampleklok en springt nooit een beetje terug (geen omgekeerde
+  volgorde). Genereert ook MIDI-clock, Start/Continue (met Song Position Pointer) en Stop.
+- `Engine/ExternalMidiInstrument` is een gewoon `Instrument` (type `midiout` in `InstrumentKey`, instellingen
+  in `pluginState`): wisselen, staarten en panic werken daardoor zonder hangende noten op de hardware.
+
+## MPE, MIDI 2.0 en CLAP (fase 3d)
+- MPE: `PartParams::mpe` laat de part bij aanzetten of klankwissel de MPE Configuration Message en de
+  buigbereiken (RPN 0) naar de klank sturen. `BuiltInSynth` verwerkt RPN 0/6, buiging en sustain op het
+  managerkanaal, en per kanaal druk en CC74 (`Expression`, gedeeld met de stemmen).
+- MIDI 2.0: `MidiRouter` kan ingangen openen via JUCE's UMP-API (`ump::Session::connectInput`, protocol
+  MIDI 2.0). `Midi2Translator` (getest) zet UMP om naar de MIDI 1.0-events van de engine volgens de
+  vertaalregels van de MIDI 2.0-standaard en verdeelt per-noot-expressie over MPE-kanalen.
+- CLAP: `Plugins/ClapHosting` is een `juce::AudioPluginFormat` + `AudioPluginInstance`. Daardoor werken
+  scannen (apart proces), de plug-inlijst, de pool, staat opslaan en het editorvenster zonder extra code.
+  Host-extensies: log, thread-check, params, state, latency, gui, note-ports, audio-ports. Noten gaan als
+  MIDI (als de plug-in dat dialect kent) of als CLAP-note-events; parameterwijzigingen van de host gaan via
+  een wachtrij als param-value-events het audioblok in, wijzigingen van de plug-in komen via de out-events
+  terug. Op Windows wordt het plug-invenster als win32-kindvenster ingebed (`HWNDComponent`).

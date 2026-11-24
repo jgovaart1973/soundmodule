@@ -54,6 +54,7 @@ private:
     void showInstrumentMenu();
     void showArpPanel();
     void chooseSfzFile();
+    void showHardwareProgramDialog();
     void rebuildInputList();
     static juce::String noteName (int note);
 

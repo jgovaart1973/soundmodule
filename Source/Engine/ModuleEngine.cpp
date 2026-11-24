@@ -48,8 +48,14 @@ void ModuleEngine::process (juce::AudioBuffer<float>& out, int n,
     for (auto& p : parts)
         p->beginBlock();
 
+    if (midiOut != nullptr)
+        midiOut->beginBlock (sampleRate, n);
+
     // Song playback for this block (also handles play/stop/locate/loop).
     const int numSeq = sequencer.generate (n, seqEvents.data(), seqPositions.data(), (int) seqEvents.size());
+
+    if (midiOut != nullptr)
+        midiOut->processClock (sequencer.isBlockRolling(), sequencer.getBlockStartBeat(), sequencer.getTempoBeatsPerSample(), n);
 
     if (panicRequested.exchange (false))
     {
@@ -195,6 +201,9 @@ void ModuleEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     const double sr = device->getCurrentSampleRate();
     const int bs = device->getCurrentBufferSizeSamples();
     prepare (sr, bs);
+
+    if (midiOut != nullptr && sr > 0.0)
+        midiOut->setOutputLatencyMs ((bs + device->getOutputLatencyInSamples()) * 1000.0 / sr);
 
     if (onAboutToStart)
         onAboutToStart (sr, bs);

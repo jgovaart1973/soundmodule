@@ -1,4 +1,5 @@
 #include "Plugins/PluginScanner.h"
+#include "Plugins/ClapHosting.h"
 
 namespace km
 {
@@ -70,7 +71,7 @@ int runPluginScanChild (const juce::StringArray& args)
     const juce::File outFile (args[i + 3]);
 
     juce::AudioPluginFormatManager formats;
-    juce::addDefaultFormatsToManager (formats);
+    km::addPluginFormats (formats);
 
     for (auto* format : formats.getFormats())
     {

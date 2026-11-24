@@ -4,6 +4,7 @@
 #include "Engine/Arpeggiator.h"
 #include "Engine/BuiltInDrums.h"
 #include "Engine/BuiltInSynth.h"
+#include "Engine/ExternalMidiInstrument.h"
 #include "Engine/SfzInstrument.h"
 #include "UI/KmLookAndFeel.h"
 
@@ -431,21 +432,42 @@ void PartRow::showInstrumentMenu()
     std::map<juce::String, juce::PopupMenu> byMaker;
     for (int k = 0; k < instruments.size(); ++k)
         byMaker[instruments[k].manufacturerName.isEmpty() ? juce::String ("Overig") : instruments[k].manufacturerName]
-            .addItem (1000 + k, instruments[k].name);
+            .addItem (1000 + k, instruments[k].name + (instruments[k].pluginFormatName == "CLAP" ? " (CLAP)" : ""));
     for (auto& [maker, sub] : byMaker)
         plugins.addSubMenu (maker, sub);
     if (instruments.isEmpty())
-        plugins.addItem (3, "Geen plug-ins gevonden - scan via Instellingen > Plug-ins", false);
-    menu.addSubMenu ("VST3-instrumenten", plugins);
+        plugins.addItem (3, "Geen plug-ins gevonden - scan via Instellingen > Plug-ins (VST3 en CLAP)", false);
+    menu.addSubMenu ("Plug-in-instrumenten (VST3 / CLAP)", plugins);
+
+    // Hardware synths on a MIDI output
+    juce::PopupMenu hardware;
+    const auto outputs = juce::MidiOutput::getAvailableDevices();
+    for (int d = 0; d < juce::jmin (40, outputs.size()); ++d)
+    {
+        juce::PopupMenu channels;
+        channels.addItem (5000 + d * 20, "Kanaal zoals binnenkomt (multitimbraal)");
+        channels.addSeparator();
+        for (int ch = 1; ch <= 16; ++ch)
+            channels.addItem (5000 + d * 20 + ch, "Kanaal " + juce::String (ch));
+        hardware.addSubMenu (outputs[d].name, channels);
+    }
+    if (outputs.isEmpty())
+        hardware.addItem (7, "Geen MIDI-uitgangen gevonden", false);
+    menu.addSubMenu ("Hardware-synth (MIDI-uitgang)", hardware);
 
     menu.addSeparator();
     auto* inst = controller.getAssignedInstrument (index);
+    const auto& partKey = controller.getPerformance().parts[(size_t) index].instrument;
+    if (partKey.type == InstrumentKey::Type::midiOut)
+        menu.addItem (6, "Programma en bank voor de hardware...");
+    menu.addItem (8, "MPE / per-noot-expressie (Seaboard, Osmose, LinnStrument, MIDI 2.0)", true,
+                  controller.getEngine().getPart (index).params.mpe.load());
     menu.addItem (4, "Origineel plug-in-venster (live bewerken)", inst != nullptr && inst->hasEditor());
     menu.addItem (5, "Klank verwijderen", inst != nullptr);
 
     juce::Component::SafePointer<PartRow> safe (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&instrumentButton),
-        [safe, instruments, recentFiles] (int result)
+        [safe, instruments, recentFiles, outputs] (int result)
         {
             if (safe == nullptr || result == 0)
                 return;
@@ -475,10 +497,65 @@ void PartRow::showInstrumentMenu()
                 if (! self.controller.getPerformance().parts[(size_t) self.index].enabled)
                     self.controller.setPartEnabled (self.index, true);
             }
+            else if (result >= 5000 && result < 5000 + 20 * outputs.size())
+            {
+                const auto& dev = outputs.getReference ((result - 5000) / 20);
+                ExternalMidiInstrument::Settings s;
+                const auto& old = self.controller.getPerformance().parts[(size_t) self.index].instrument;
+                if (old.type == InstrumentKey::Type::midiOut)
+                    s = ExternalMidiInstrument::Settings::fromString (old.pluginState); // keep program / bank
+                s.channel = (result - 5000) % 20;
+                self.controller.setPartInstrument (self.index, ExternalMidiInstrument::makeKey (dev.identifier, dev.name, s));
+                if (! self.controller.getPerformance().parts[(size_t) self.index].enabled)
+                    self.controller.setPartEnabled (self.index, true);
+            }
+            else if (result == 6) self.showHardwareProgramDialog();
+            else if (result == 8)
+            {
+                auto& mpe = self.controller.getEngine().getPart (self.index).params.mpe;
+                mpe = ! mpe.load();
+                self.controller.markDirty();
+                self.instrumentButton.setButtonText (self.instrumentButton.getButtonText());
+            }
             else if (result == 2) self.chooseSfzFile();
             else if (result == 4) { if (self.onOpenEditor) self.onOpenEditor (self.index); }
             else if (result == 5) self.controller.setPartInstrument (self.index, {});
         });
+}
+
+void PartRow::showHardwareProgramDialog()
+{
+    const auto key = controller.getPerformance().parts[(size_t) index].instrument;
+    if (key.type != InstrumentKey::Type::midiOut)
+        return;
+    const auto s = ExternalMidiInstrument::Settings::fromString (key.pluginState);
+
+    auto* w = new juce::AlertWindow ("Hardware-synth: programma",
+                                     "Welke klank moet de hardware kiezen als deze performance of dit nummer start?\n"
+                                     "Leeg laten = niets sturen.",
+                                     juce::MessageBoxIconType::NoIcon);
+    w->addTextEditor ("program", s.program >= 0 ? juce::String (s.program + 1) : juce::String(), "Programma (1-128):");
+    w->addTextEditor ("msb", s.bank >= 0 ? juce::String (s.bank >> 7) : juce::String(), "Bank MSB (CC 0, 0-127):");
+    w->addTextEditor ("lsb", s.bank >= 0 ? juce::String (s.bank & 0x7f) : juce::String(), "Bank LSB (CC 32, 0-127):");
+    w->addButton ("OK", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton ("Annuleren", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<PartRow> safe (this);
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe, w, key] (int r)
+    {
+        std::unique_ptr<juce::AlertWindow> owner (w);
+        if (safe == nullptr || r != 1)
+            return;
+        auto st = ExternalMidiInstrument::Settings::fromString (key.pluginState);
+        const auto prog = w->getTextEditorContents ("program").trim();
+        const auto msb = w->getTextEditorContents ("msb").trim(), lsb = w->getTextEditorContents ("lsb").trim();
+        st.program = prog.isEmpty() ? -1 : juce::jlimit (1, 128, prog.getIntValue()) - 1;
+        st.bank = (msb.isEmpty() && lsb.isEmpty()) ? -1
+                                                   : juce::jlimit (0, 127, msb.getIntValue()) * 128 + juce::jlimit (0, 127, lsb.getIntValue());
+        const auto deviceName = key.displayName.upToFirstOccurrenceOf (" kan ", false, false)
+                                               .upToFirstOccurrenceOf (" (kanaal", false, false);
+        safe->controller.setPartInstrument (safe->index, ExternalMidiInstrument::makeKey (key.ref, deviceName, st));
+    }), false);
 }
 
 void PartRow::chooseSfzFile()

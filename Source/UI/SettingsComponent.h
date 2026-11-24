@@ -22,6 +22,7 @@ private:
     class AudioPage;
     class MidiPage;
     class SoundsPage;
+    class MidiOutPage;
 
     AppController& controller;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };

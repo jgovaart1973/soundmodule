@@ -3,6 +3,7 @@
 #include "Engine/InstrumentPool.h"
 #include "Engine/ModuleEngine.h"
 #include "Midi/MidiLearn.h"
+#include "Midi/MidiOutHub.h"
 #include "Midi/MidiRouter.h"
 #include "Model/Performance.h"
 #include "Model/ProgramMap.h"
@@ -82,6 +83,16 @@ public:
     juce::KnownPluginList& getKnownPlugins() noexcept     { return knownPlugins; }
     juce::PropertiesFile& getSettings() noexcept          { return *settings; }
     InstrumentPool& getPool() noexcept                    { return pool; }
+    MidiOutHub& getMidiOutHub() noexcept                  { return midiOutHub; }
+
+    /** MIDI clock / transport to these output devices (identifiers); stored in the settings. */
+    void setMidiClockOutputs (const juce::StringArray& identifiers);
+    /** Extra delay for all hardware MIDI output, in ms (can be negative). */
+    void setMidiOutOffsetMs (double ms);
+    /** MIDI 2.0 input (UMP) and per-note expression -> MPE; stored in the settings. */
+    void setMidi2Input (bool useUmp, bool perNoteAsMpe);
+    /** Send a .syx file to an output device. @returns false with an error message. */
+    bool sendSysExFile (const juce::String& identifier, const juce::File& file, juce::String& error);
 
     int getControlChannel() const noexcept { return engine.controlChannel.load(); }
     void setControlChannel (int channel);
@@ -127,6 +138,7 @@ private:
     MidiRouter router { midiQueue, learn };
     juce::AudioPluginFormatManager formatManager;
     juce::KnownPluginList knownPlugins;
+    MidiOutHub midiOutHub;   ///< outlives the pool (hardware "sounds" point to it) and the engine
     InstrumentPool pool { formatManager, knownPlugins };
     ModuleEngine engine { &midiQueue };
     juce::AudioDeviceManager deviceManager;

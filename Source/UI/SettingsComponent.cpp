@@ -75,6 +75,17 @@ public:
         gmMode.setToggleState (controller.isGeneralMidiMode(), juce::dontSendNotification);
         gmMode.onClick = [this] { controller.setGeneralMidiMode (gmMode.getToggleState()); };
 
+        addAndMakeVisible (midi2);
+        midi2.setButtonText ("MIDI 2.0: ingangen openen als Universal MIDI Packet-apparaat (hoge resolutie, per-noot-expressie)");
+        midi2.setToggleState (controller.getMidiRouter().isUmpMode(), juce::dontSendNotification);
+        midi2.onClick = [this] { controller.setMidi2Input (midi2.getToggleState(), midi2Mpe.getToggleState()); refresh(); };
+        addAndMakeVisible (midi2Mpe);
+        midi2Mpe.setButtonText ("Per-noot-expressie van MIDI 2.0 omzetten naar MPE (zet MPE aan op de part)");
+        midi2Mpe.setToggleState (controller.getSettings().getBoolValue ("midi2PerNoteMpe", true), juce::dontSendNotification);
+        midi2Mpe.onClick = [this] { controller.setMidi2Input (midi2.getToggleState(), midi2Mpe.getToggleState()); };
+        addAndMakeVisible (midi2Status);
+        midi2Status.setColour (juce::Label::textColourId, colours::textDim);
+
         addAndMakeVisible (learnTitle);
         learnTitle.setText ("MIDI Learn", juce::dontSendNotification);
         learnTitle.setFont (juce::FontOptions (16.0f, juce::Font::bold));
@@ -140,7 +151,11 @@ public:
         controlChannel.setBounds (cc.removeFromLeft (140));
         r.removeFromTop (6);
         gmMode.setBounds (r.removeFromTop (28));
-        r.removeFromTop (16);
+        r.removeFromTop (6);
+        midi2.setBounds (r.removeFromTop (28));
+        midi2Mpe.setBounds (r.removeFromTop (28).withTrimmedLeft (24));
+        midi2Status.setBounds (r.removeFromTop (22).withTrimmedLeft (24));
+        r.removeFromTop (12);
         learnTitle.setBounds (r.removeFromTop (26));
         learnInfo->setBounds (r.removeFromTop (44));
         auto buttons = r.removeFromTop (32);
@@ -165,6 +180,13 @@ private:
         for (auto* row : rows)
             row->lamp.update (controller.getMidiRouter().getActivity (row->slot));
 
+        auto& router = controller.getMidiRouter();
+        midi2Mpe.setEnabled (router.isUmpMode());
+        midi2Status.setText (router.isUmpMode() ? "MIDI 2.0-verbindingen: " + juce::String (router.getNumMidi2Inputs())
+                                                      + " (apparaten die alleen MIDI 1.0 kennen werken gewoon door)"
+                                                : juce::String ("Uit: klassieke MIDI 1.0-ingangen"),
+                             juce::dontSendNotification);
+
         auto& learn = controller.getMidiLearn();
         for (int i = 0; i < actionButtons.size(); ++i)
         {
@@ -180,7 +202,8 @@ private:
     AppController& controller;
     juce::Label devicesTitle, controlLabel, learnTitle;
     juce::ComboBox controlChannel;
-    juce::ToggleButton gmMode;
+    juce::ToggleButton gmMode, midi2, midi2Mpe;
+    juce::Label midi2Status;
     juce::OwnedArray<Row> rows;
     juce::OwnedArray<juce::Label> labels;
     juce::OwnedArray<juce::TextButton> actionButtons;
@@ -234,12 +257,131 @@ private:
 };
 
 //==============================================================================
+/** Hardware MIDI outputs: clock, timing offset and SysEx. */
+class SettingsComponent::MidiOutPage final : public juce::Component
+{
+public:
+    explicit MidiOutPage (AppController& c) : controller (c)
+    {
+        addAndMakeVisible (title);
+        title.setText ("MIDI-clock en start/stop sturen naar:", juce::dontSendNotification);
+        title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+
+        addAndMakeVisible (offsetLabel);
+        offsetLabel.setText ("Vertraging MIDI-uit t.o.v. geluid (ms):", juce::dontSendNotification);
+        addAndMakeVisible (offset);
+        offset.setSliderStyle (juce::Slider::LinearHorizontal);
+        offset.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 24);
+        offset.setRange (-50.0, 100.0, 0.5);
+        offset.setValue (controller.getMidiOutHub().getUserOffsetMs(), juce::dontSendNotification);
+        offset.onValueChange = [this] { controller.setMidiOutOffsetMs (offset.getValue()); };
+
+        addAndMakeVisible (sysexDevice);
+        addAndMakeVisible (sysexButton);
+        sysexButton.onClick = [this] { sendSysEx(); };
+        addAndMakeVisible (refreshButton);
+        refreshButton.onClick = [this] { refresh(); };
+
+        info = makeInfo (*this, labels,
+            "Een hardware-synth bespeel je door bij een part als klank 'Hardware-synth (MIDI-uitgang)' te kiezen.\n"
+            "Live spelen, het nummer, de arpeggiator en het akkoordspoor gaan dan naar dat apparaat.\n"
+            "De vertraging wordt automatisch gelijkgezet met de geluidskaart; stel hier bij als je synth\n"
+            "te vroeg (+) of te laat (-) klinkt. Neem het geluid van de synth op via een audiospoor.");
+        refresh();
+    }
+
+    void refresh()
+    {
+        devices = juce::MidiOutput::getAvailableDevices();
+        toggles.clear();
+        const auto clock = controller.getMidiOutHub().getClockOutputs();
+        for (auto& d : devices)
+        {
+            auto* t = toggles.add (new juce::ToggleButton (d.name));
+            t->setToggleState (clock.contains (d.identifier), juce::dontSendNotification);
+            t->onClick = [this] { storeClock(); };
+            addAndMakeVisible (t);
+        }
+        sysexDevice.clear (juce::dontSendNotification);
+        for (int i = 0; i < devices.size(); ++i)
+            sysexDevice.addItem (devices[i].name, i + 1);
+        sysexDevice.setSelectedItemIndex (0, juce::dontSendNotification);
+        sysexDevice.setTextWhenNoChoicesAvailable ("Geen MIDI-uitgangen");
+        resized();
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (12);
+        auto top = r.removeFromTop (28);
+        refreshButton.setBounds (top.removeFromRight (120));
+        title.setBounds (top);
+        for (auto* t : toggles)
+            t->setBounds (r.removeFromTop (26).withTrimmedLeft (12));
+        if (toggles.isEmpty())
+            r.removeFromTop (26);
+        r.removeFromTop (12);
+        auto o = r.removeFromTop (28);
+        offsetLabel.setBounds (o.removeFromLeft (260));
+        offset.setBounds (o.removeFromLeft (360));
+        r.removeFromTop (12);
+        auto s = r.removeFromTop (30);
+        sysexDevice.setBounds (s.removeFromLeft (300));
+        s.removeFromLeft (8);
+        sysexButton.setBounds (s.removeFromLeft (220));
+        r.removeFromTop (12);
+        info->setBounds (r.removeFromTop (90));
+    }
+
+private:
+    void storeClock()
+    {
+        juce::StringArray ids;
+        for (int i = 0; i < toggles.size() && i < devices.size(); ++i)
+            if (toggles[i]->getToggleState())
+                ids.add (devices[i].identifier);
+        controller.setMidiClockOutputs (ids);
+    }
+
+    void sendSysEx()
+    {
+        const int i = sysexDevice.getSelectedItemIndex();
+        if (! juce::isPositiveAndBelow (i, devices.size()))
+            return;
+        const auto id = devices[i].identifier;
+        chooser = std::make_unique<juce::FileChooser> ("Kies een SysEx-bestand", juce::File(), "*.syx");
+        juce::Component::SafePointer<MidiOutPage> safe (this);
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [safe, id] (const juce::FileChooser& fc)
+            {
+                if (safe == nullptr || fc.getResult() == juce::File())
+                    return;
+                juce::String error;
+                if (! safe->controller.sendSysExFile (id, fc.getResult(), error))
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "SysEx", error);
+            });
+    }
+
+    AppController& controller;
+    juce::Array<juce::MidiDeviceInfo> devices;
+    juce::OwnedArray<juce::ToggleButton> toggles;
+    juce::Label title, offsetLabel;
+    juce::Slider offset;
+    juce::ComboBox sysexDevice;
+    juce::TextButton sysexButton { "SysEx-bestand sturen..." }, refreshButton { "Vernieuwen" };
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::OwnedArray<juce::Label> labels;
+    juce::Label* info = nullptr;
+};
+
+//==============================================================================
 SettingsComponent::SettingsComponent (AppController& c) : controller (c)
 {
     const auto bg = colours::panel;
     tabs.addTab ("Audio", bg, new AudioPage (controller), true);
     midiPage = new MidiPage (controller);
     tabs.addTab ("MIDI", bg, midiPage, true);
+    tabs.addTab ("MIDI-uit", bg, new MidiOutPage (controller), true);
     tabs.addTab ("Plug-ins", bg,
                  new juce::PluginListComponent (controller.getFormatManager(), controller.getKnownPlugins(),
                                                 paths::deadMansPedalFile(), &controller.getSettings(), true),
@@ -247,7 +389,7 @@ SettingsComponent::SettingsComponent (AppController& c) : controller (c)
     tabs.addTab ("Klanken", bg, new SoundsPage (controller), true);
     tabs.setTabBarDepth (34);
     addAndMakeVisible (tabs);
-    setSize (760, 560);
+    setSize (860, 680);
 }
 
 SettingsComponent::~SettingsComponent()

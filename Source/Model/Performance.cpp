@@ -49,6 +49,7 @@ namespace
             case InstrumentKey::Type::builtIn: return "builtin";
             case InstrumentKey::Type::sfz:     return "sfz";
             case InstrumentKey::Type::plugin:  return "plugin";
+            case InstrumentKey::Type::midiOut: return "midiout";
             case InstrumentKey::Type::none:
             default:                           return "none";
         }
@@ -59,6 +60,7 @@ namespace
         if (s == "builtin") return InstrumentKey::Type::builtIn;
         if (s == "sfz")     return InstrumentKey::Type::sfz;
         if (s == "plugin")  return InstrumentKey::Type::plugin;
+        if (s == "midiout") return InstrumentKey::Type::midiOut;
         return InstrumentKey::Type::none;
     }
 } // namespace
@@ -117,6 +119,7 @@ juce::var PartConfig::toVar() const
     arp->setProperty ("gate", arpGate);
     arp->setProperty ("latch", arpLatch);
     o->setProperty ("arpeggiator", juce::var (arp));
+    o->setProperty ("mpe", mpe);
     return juce::var (o);
 }
 
@@ -148,6 +151,7 @@ PartConfig PartConfig::fromVar (const juce::var& v)
     p.arpOctaves = getI (arp, "octaves", 1, 1, 4);
     p.arpGate = getF (arp, "gate", 0.6f, 0.05f, 1.0f);
     p.arpLatch = (bool) get (arp, "latch", false);
+    p.mpe = (bool) get (v, "mpe", false);
     return p;
 }
 

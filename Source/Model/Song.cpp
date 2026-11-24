@@ -125,6 +125,7 @@ juce::String Song::toJson() const
     for (auto& c : chords)
         chordList.add (juce::Array<juce::var> { c.beat, c.length, c.root, c.type });
     root->setProperty ("chords", chordList);
+    root->setProperty ("keySignature", keySignature);
 
     juce::var perf;
     juce::JSON::parse (performance.toJson(), perf);
@@ -223,6 +224,9 @@ bool Song::fromJson (const juce::String& json, juce::String& error)
         for (auto& tc : *tempos)
             if (tc.size() >= 2 && (double) tc[0] > 0.0)
                 s.setTempoAt ((double) tc[0], (double) tc[1]);
+
+    if (const int k = (int) prop (root, "keySignature", autoKey); k >= -7 && k <= 7)
+        s.keySignature = k;
 
     if (auto* chordArray = prop (root, "chords", {}).getArray())
         for (auto& c : *chordArray)

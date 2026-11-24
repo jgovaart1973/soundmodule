@@ -49,6 +49,19 @@ PianoRoll::PianoRoll (AppController& a, SongController& s) : app (a), song (s)
         song.setTrackDrums (track, drumMode);
     };
 
+    addAndMakeVisible (scoreButton);
+    scoreButton.setClickingTogglesState (true);
+    scoreButton.setTooltip ("Notenbalk: de clip als bladmuziek (bewerken blijft in de pianorol)");
+    scoreButton.onClick = [this]
+    {
+        score.setVisible (scoreButton.getToggleState());
+        updateScore();
+        resized();
+        repaint();
+    };
+    addChildComponent (score);
+    score.onKeyChosen = [this] (int key) { song.setKeySignature (key); };
+
     addAndMakeVisible (quantizeButton);
     quantizeButton.setTooltip ("Gekozen noten (of alle) naar het raster trekken");
     quantizeButton.onClick = [this] { quantizeNow(); };
@@ -151,6 +164,17 @@ void PianoRoll::open (int t, int c)
     repaint();
 }
 
+void PianoRoll::updateScore()
+{
+    if (! score.isVisible() || ! isOpen())
+        return;
+    const auto& sg = song.getSong();
+    juce::String name = clip.name;
+    if (juce::isPositiveAndBelow (track, (int) sg.tracks.size()))
+        name = sg.tracks[(size_t) track].name + (clip.name.isNotEmpty() ? " - " + clip.name : juce::String());
+    score.setContent (clip.notes, clip.length, sg.beatsPerBar, sg.beatUnit, sg.keySignature, name);
+}
+
 void PianoRoll::reloadFromSong()
 {
     if (drag != Drag::none)
@@ -176,6 +200,7 @@ void PianoRoll::reloadFromSong()
     const auto& tr = song.getSong().tracks[(size_t) track];
     title.setText (tr.name + "  -  " + (clip.name.isNotEmpty() ? clip.name : juce::String ("Clip")), juce::dontSendNotification);
     updateScrollBars();
+    updateScore();
     repaint();
 }
 
@@ -325,6 +350,7 @@ void PianoRoll::resized()
 
     place (title, 130);
     place (drumsButton, 64);
+    place (scoreButton, 90);
     place (gridBox, 110);
     place (snapButton, 76);
     place (quantizeButton, 110);
@@ -338,6 +364,7 @@ void PianoRoll::resized()
     place (semiUp, 34);
     place (octUp, 40);
 
+    score.setBounds (r);
     hScroll.setBounds (r.removeFromBottom (scrollSize).withTrimmedLeft (kbWidth()).withTrimmedRight (scrollSize));
     auto cc = r.removeFromBottom (ccHeight);
     auto vel = r.removeFromBottom (velocityHeight);
@@ -384,6 +411,8 @@ void PianoRoll::timerCallback()
 {
     if (isOpen() && app.getEngine().sequencer.isRolling())
         repaint (gridArea.getUnion (velocityArea).getUnion (ccArea).toNearestInt());
+    if (score.isVisible())
+        score.setPlayhead (isOpen() && app.getEngine().sequencer.isRolling() ? app.getEngine().sequencer.getPosition() - clip.start : -1.0);
 }
 
 //==============================================================================

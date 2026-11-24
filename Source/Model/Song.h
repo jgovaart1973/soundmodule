@@ -102,6 +102,8 @@ struct Song
     std::vector<Track> tracks;
     std::vector<TempoChange> tempoChanges;   ///< sorted by beat, all > 0; 'bpm' is the tempo at the start
     std::vector<ChordEvent> chords;          ///< chord track, sorted by beat
+    static constexpr int autoKey = -99;
+    int keySignature = autoKey;              ///< notation: fifths -7..7, or autoKey (guess from the notes)
     Performance performance;
 
     double beatsPerBarAsQuarters() const noexcept { return beatsPerBar * 4.0 / beatUnit; }

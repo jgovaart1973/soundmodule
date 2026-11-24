@@ -17,7 +17,8 @@ struct InstrumentKey
         none = 0,
         builtIn,  ///< ref = preset index ("0".."7")
         sfz,      ///< ref = absolute path to .sfz file
-        plugin    ///< ref = juce::PluginDescription::createIdentifierString()
+        plugin,   ///< ref = juce::PluginDescription::createIdentifierString()
+        midiOut   ///< ref = MIDI output identifier, pluginState = channel/program settings (hardware synth)
     };
 
     Type type = Type::none;
@@ -78,6 +79,8 @@ struct PartConfig
     int arpOctaves = 1;
     float arpGate = 0.6f;
     bool arpLatch = false;
+
+    bool mpe = false;      ///< per-note expression (MPE controllers, MIDI 2.0 per-note data)
 
     juce::var toVar() const;
     static PartConfig fromVar (const juce::var&);

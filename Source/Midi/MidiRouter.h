@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Midi/Midi2Translator.h"
 #include "Midi/MidiEvent.h"
 #include "Midi/MidiLearn.h"
 
@@ -43,6 +44,13 @@ public:
     juce::StringArray getDisabledDevices() const { return disabledIds; }
     void setDisabledDevices (const juce::StringArray& ids);
 
+    /** MIDI 2.0: open inputs as Universal MIDI Packet endpoints and translate (see Midi2Translator).
+        Devices that only speak MIDI 1.0 keep working. Reopens all inputs. */
+    void setUmpMode (bool useUmp, bool perNoteAsMpe);
+    bool isUmpMode() const noexcept { return umpMode; }
+    /** Number of open inputs that currently deliver MIDI 2.0 protocol packets. */
+    int getNumMidi2Inputs() const;
+
     uint32_t getActivity (int slot) const noexcept
     {
         return slot >= 0 && slot < kMaxMidiSources ? activity[(size_t) slot].load (std::memory_order_relaxed) : 0;
@@ -55,15 +63,23 @@ public:
     std::function<void()> onDeviceRemoved;
 
 private:
-    struct Input final : public juce::MidiInputCallback
+    struct Input final : public juce::MidiInputCallback, public juce::universal_midi_packets::Consumer
     {
-        Input (MidiRouter& r, int s) : router (r), slot (s) {}
+        Input (MidiRouter& r, int s, const juce::String& id) : router (r), slot (s), identifier (id) {}
+        ~Input() override;
         void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+        void consume (juce::universal_midi_packets::Iterator b, juce::universal_midi_packets::Iterator e, double) override;
+        void deliver (uint8_t b0, uint8_t b1, uint8_t b2, int size);
 
         MidiRouter& router;
         const int slot;
+        const juce::String identifier;
         std::unique_ptr<juce::MidiInput> device;
+        juce::universal_midi_packets::Input ump;
+        Midi2Translator translator;
     };
+
+    bool openUmp (Input& input);
 
     void refresh();
     int slotFor (const juce::String& identifier);
@@ -79,6 +95,8 @@ private:
     std::array<std::atomic<uint32_t>, kMaxMidiSources> activity {};
     juce::MidiDeviceListConnection connection;
     bool running = false;
+    bool umpMode = false, umpPerNoteAsMpe = true;
+    std::unique_ptr<juce::universal_midi_packets::Session> session;
 
     JUCE_DECLARE_NON_COPYABLE (MidiRouter)
 };

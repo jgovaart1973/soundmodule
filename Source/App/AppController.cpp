@@ -1,4 +1,5 @@
 #include "App/AppController.h"
+#include "Plugins/ClapHosting.h"
 
 #include "Core/AppPaths.h"
 #include "Engine/BuiltInSynth.h"
@@ -18,7 +19,7 @@ namespace
 
 AppController::AppController()
 {
-    juce::addDefaultFormatsToManager (formatManager);
+    km::addPluginFormats (formatManager);
 
     juce::PropertiesFile::Options opts;
     opts.applicationName = "KlankModule";
@@ -73,7 +74,14 @@ void AppController::initialise()
         engine.requestPanic();
         setStatus ("MIDI-apparaat losgekoppeld: alle noten uit.");
     };
+    router.setUmpMode (settings->getBoolValue ("midi2Inputs", false), settings->getBoolValue ("midi2PerNoteMpe", true));
     router.start();
+
+    // Hardware MIDI outputs
+    pool.setMidiOutHub (&midiOutHub);
+    engine.setMidiOutHub (&midiOutHub);
+    midiOutHub.setUserOffsetMs (settings->getDoubleValue ("midiOutOffsetMs", 0.0));
+    midiOutHub.setClockOutputs (juce::StringArray::fromLines (settings->getValue ("midiClockOutputs")));
 
     // Audio
     // (WeakReference is created out here: MSVC rejects 'this' in a nested lambda's init-capture.)
@@ -333,6 +341,7 @@ void AppController::applyPartRealtime (int i)
     p.arpOctaves = c.arpOctaves;
     p.arpGate = c.arpGate;
     p.arpLatch = c.arpLatch;
+    p.mpe = c.mpe;
 }
 
 void AppController::captureRealtimeIntoModel()
@@ -353,6 +362,7 @@ void AppController::captureRealtimeIntoModel()
         c.arpOctaves = p.arpOctaves;
         c.arpGate = p.arpGate;
         c.arpLatch = p.arpLatch;
+        c.mpe = p.mpe;
 
         // Plug-in sound settings live inside the plug-in: capture them.
         if (auto* inst = assigned[(size_t) i]; inst != nullptr && inst->key.type == InstrumentKey::Type::plugin)
@@ -558,6 +568,8 @@ void AppController::handleProgramRequest (const ProgramRequest& req)
     }
 
     const int part = req.part;
+    if (performance.parts[(size_t) part].instrument.type == InstrumentKey::Type::midiOut)
+        return; // a hardware synth gets the Program Change itself
     if (auto* mapped = programMap.find (req.bank, req.program))
     {
         setPartInstrument (part, *mapped);
@@ -769,4 +781,71 @@ void AppController::setPreloadAll (bool on)
     updatePreloads();
 }
 
+} // namespace km
+
+namespace km
+{
+void AppController::setMidiClockOutputs (const juce::StringArray& identifiers)
+{
+    midiOutHub.setClockOutputs (identifiers);
+    settings->setValue ("midiClockOutputs", identifiers.joinIntoString ("\n"));
+}
+
+void AppController::setMidi2Input (bool useUmp, bool perNoteAsMpe)
+{
+    router.setUmpMode (useUmp, perNoteAsMpe);
+    settings->setValue ("midi2Inputs", useUmp);
+    settings->setValue ("midi2PerNoteMpe", perNoteAsMpe);
+    setStatus (useUmp ? "MIDI 2.0-ingangen aan." : "MIDI 2.0-ingangen uit (MIDI 1.0).");
+}
+
+void AppController::setMidiOutOffsetMs (double ms)
+{
+    midiOutHub.setUserOffsetMs (ms);
+    settings->setValue ("midiOutOffsetMs", ms);
+}
+
+bool AppController::sendSysExFile (const juce::String& identifier, const juce::File& file, juce::String& error)
+{
+    juce::MemoryBlock data;
+    if (! file.loadFileAsData (data) || data.getSize() < 2)
+    {
+        error = "Kan " + file.getFileName() + " niet lezen.";
+        return false;
+    }
+    juce::String name;
+    for (auto& d : juce::MidiOutput::getAvailableDevices())
+        if (d.identifier == identifier)
+            name = d.name;
+    const int slot = midiOutHub.acquirePort (identifier, name);
+    if (slot < 0 || ! midiOutHub.isPortOpen (slot))
+    {
+        error = "MIDI-uitgang niet beschikbaar.";
+        return false;
+    }
+    // A .syx file can hold several messages, each F0 ... F7.
+    const auto* bytes = static_cast<const juce::uint8*> (data.getData());
+    int count = 0;
+    for (size_t i = 0; i < data.getSize(); ++i)
+    {
+        if (bytes[i] != 0xf0)
+            continue;
+        size_t end = i + 1;
+        while (end < data.getSize() && bytes[end] != 0xf7)
+            ++end;
+        if (end >= data.getSize())
+            break;
+        midiOutHub.sendNow (slot, juce::MidiMessage (bytes + i, (int) (end - i + 1)));
+        juce::Thread::sleep (20); // older synths need a breather between SysEx messages
+        ++count;
+        i = end;
+    }
+    if (count == 0)
+    {
+        error = file.getFileName() + " bevat geen SysEx-berichten.";
+        return false;
+    }
+    setStatus ("SysEx verstuurd: " + juce::String (count) + " bericht(en) naar " + name);
+    return true;
+}
 } // namespace km

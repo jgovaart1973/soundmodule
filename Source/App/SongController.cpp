@@ -833,6 +833,17 @@ void SongController::setChord (double beat, double length, int root, int type)
     changed();
 }
 
+void SongController::setKeySignature (int fifths)
+{
+    if (fifths != Song::autoKey)
+        fifths = juce::jlimit (-7, 7, fifths);
+    if (song.keySignature == fifths)
+        return;
+    pushUndo ("Toonsoort");
+    song.keySignature = fifths;
+    changed();
+}
+
 void SongController::removeChord (double beat)
 {
     pushUndo ("Akkoord verwijderen");

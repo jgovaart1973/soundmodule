@@ -1,4 +1,5 @@
 #include "Render/OfflineRenderer.h"
+#include "Plugins/ClapHosting.h"
 
 #include "Core/AppPaths.h"
 
@@ -8,7 +9,7 @@ namespace km
 {
 OfflineRenderer::OfflineRenderer (double sr, int bs) : sampleRate (sr), blockSize (bs)
 {
-    juce::addDefaultFormatsToManager (formats);
+    km::addPluginFormats (formats);
     if (auto xml = juce::parseXML (paths::pluginListFile()))
         knownPlugins.recreateFromXml (*xml);
 
@@ -56,6 +57,7 @@ bool OfflineRenderer::loadPerformance (const Performance& p, juce::String& error
         params.arpOctaves = c.arpOctaves;
         params.arpGate = c.arpGate;
         params.arpLatch = c.arpLatch;
+        params.mpe = c.mpe;
 
         if (! c.enabled || c.instrument.isEmpty())
             continue;

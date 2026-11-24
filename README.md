@@ -3,14 +3,15 @@
 Een Windows x64-programma dat je pc verandert in een hoogwaardige **klankmodule voor MIDI-apparaten**.
 Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule), **fase 2a**
 (opnemen en arrangeren), **fase 2b** (pianorol, ongedaan maken), **fase 3a** (audiosporen en
-tempowisselingen) en **fase 3b** (drumstel en drum-editor, arpeggiator, akkoordspoor).
+tempowisselingen), **fase 3b** (drumstel en drum-editor, arpeggiator, akkoordspoor), **fase 3c**
+(notenbalk, hardware-synths via MIDI-uit, MIDI-clock, SysEx) en **fase 3d** (MPE, MIDI 2.0, CLAP-plug-ins).
 
 ## Wat het nu kan (fase 1)
 
 | Functie | Details |
 | --- | --- |
 | 16 multitimbrale parts | Per part: MIDI-ingang (of alle), kanaal (of omni), klank, volume, pan, transpose, key split, velocity layer en aanslagcurve |
-| Klanken | 8 ingebouwde klanken (direct speelbaar), SFZ-bibliotheken via sfizz (bijv. Salamander Grand Piano), VST3-instrumenten |
+| Klanken | 8 ingebouwde klanken + drumstel, SFZ-bibliotheken via sfizz (bijv. Salamander Grand Piano), VST3- en CLAP-instrumenten, hardware-synths via MIDI-uit |
 | Mixer | 16 kanalen met mute/solo, meters, 2 effect-sends (galm, ping-pong delay), transparante master-limiter |
 | Performances | Alle instellingen opslaan als `.kmperf` (leesbare JSON). Wisselen zonder hangende noten: lopende noten klinken uit op de oude klank |
 | Snel wisselen | Klanken van alle opgeslagen performances worden vooraf geladen; gelijke klanken worden hergebruikt |
@@ -20,7 +21,7 @@ tempowisselingen) en **fase 3b** (drumstel en drum-editor, arpeggiator, akkoords
 | Plug-ins scannen | Elke plug-in wordt in een apart proces gescand: een crashende plug-in neemt de app niet mee |
 
 ## Plug-ins live bewerken
-Elke part met een VST3-instrument heeft een knop **VST**. Die opent het originele venster van de plug-in,
+Elke part met een VST3- of CLAP-instrument heeft een knop **VST**. Die opent het originele venster van de plug-in,
 of haalt het naar voren als het al open is. Klik nog eens terwijl het voorop staat en het sluit.
 - Kies je een nieuwe plug-in in het klankmenu, dan opent het venster vanzelf zodra hij geladen is.
 - Alles wat je in het venster verandert hoor je direct; de performance krijgt de markering *gewijzigd*.
@@ -115,6 +116,46 @@ Onder het tempospoor staat het **akkoordspoor**.
 - **Begeleiding maken** / **Baslijn maken** (rechtsklik op het akkoordspoor) zet een nieuwe clip met
   akkoorden en/of grondtonen op het gekozen MIDI-spoor - handig als startpunt, daarna vrij te bewerken.
 
+## Notenbalk (fase 3c)
+In de pianorol zet de knop **Notenbalk** de clip om in bladmuziek op een pianosysteem (G- en F-sleutel).
+- Toonsoort: *Automatisch* raadt hem uit de noten, of kies er zelf een (wordt in het nummer bewaard).
+- Weergave in 1/8, 1/16 of 1/32: alleen de weergave wordt afgerond, het nummer blijft zoals het is.
+- Notenwaarden met punten en overbindingen, waardestrepen per tel (6/8 in groepjes van drie), voortekens
+  die per maat blijven gelden, rusten, hulplijnen. Noten vanaf C4 staan in de G-sleutel.
+- **Opslaan als afbeelding...** maakt een PNG om te printen. Ctrl+muiswiel zoomt.
+- Bewerken doe je in de pianorol of de drum-editor: de notenbalk volgt direct.
+
+## Hardware-synths, MIDI-clock en SysEx (fase 3c)
+- Kies bij een part *Klank > Hardware-synth (MIDI-uitgang) > apparaat > kanaal*. Live spelen, het nummer,
+  de arpeggiator en het akkoordspoor sturen die part dan naar de hardware. *Kanaal zoals binnenkomt*
+  laat een multitimbrale synth alle kanalen ontvangen.
+- *Programma en bank voor de hardware...* (in hetzelfde menu): KlankModule kiest die klank op de synth
+  zodra de performance of het nummer start.
+- Wisselen, panic en stoppen sturen note-offs: er blijven geen noten hangen op de hardware.
+- De timing loopt gelijk met de geluidskaart (de vertraging van de audio wordt meegerekend).
+  Fijnregelen kan in *Instellingen > MIDI-uit*.
+- Daar kies je ook de apparaten die **MIDI-clock** krijgen (24 ppq + start/stop/continue + songpositie),
+  zodat drummachines en sequencers meelopen, en stuur je een **SysEx-bestand** (.syx) naar een apparaat.
+- Het geluid van de hardware neem je op via een audiospoor (fase 3a).
+
+## MPE en MIDI 2.0 (fase 3d)
+- **MPE** (per-noot-expressie, bijvoorbeeld ROLI Seaboard, Expressive E Osmose, LinnStrument):
+  zet bij een part *Klank > MPE* aan. De part stuurt dan de MPE-configuratie (lagere zone, 15 kanalen,
+  buiging ±48) naar de klank. De ingebouwde klanken reageren per noot op buiging, druk (luider en
+  helderder) en timbre (CC74); VST3- en CLAP-plug-ins met MPE-ondersteuning krijgen hetzelfde.
+  Een hardware-synth op MIDI-uit krijgt de configuratie ook.
+- **MIDI 2.0**: *Instellingen > MIDI > MIDI 2.0* opent de ingangen als Universal MIDI Packet-apparaten.
+  Waarden met hoge resolutie worden netjes omgerekend, en per-noot-buiging, -druk en -controllers
+  worden omgezet naar MPE (zet dan ook MPE aan op de part). Apparaten die alleen MIDI 1.0 kennen,
+  werken gewoon door. Zie de beperkingen hieronder voor Windows.
+
+## CLAP-plug-ins (fase 3d)
+CLAP-instrumenten werken net als VST3: scannen (in een apart proces), kiezen in het klankmenu
+(met *(CLAP)* achter de naam), het eigen venster openen en live bewerken, en de instellingen worden
+in de performance en het nummer bewaard. Zoekmappen: `C:\Program Files\Common Files\CLAP`,
+`%LOCALAPPDATA%\Programs\Common\CLAP` en de mappen in de omgevingsvariabele `CLAP_PATH`.
+Heeft een plug-in geen eigen venster, dan krijg je schuiven voor alle parameters.
+
 ## Bouwen op Windows
 
 **Eenmalig installeren**
@@ -153,7 +194,7 @@ ASIO-licentie van Steinberg (app mag gesloten blijven) of de GPLv3-optie (app wo
 3. Speel. In de bovenbalk knippert een lampje per MIDI-apparaat.
 4. Betere piano: voer `Scripts\download_sounds.ps1` uit (Salamander Grand Piano, ~700 MB, CC-BY 3.0).
    Kies daarna bij een part *Klank > SFZ-bibliotheek laden...*.
-5. VST3-instrumenten: *Instellingen > Plug-ins > Options > Scan for new or updated VST3 plug-ins*.
+5. Plug-ins: *Instellingen > Plug-ins > Options > Scan for new or updated VST3 plug-ins* (en idem voor *CLAP*).
 
 ### Voorbeeld: split met bas links en piano rechts
 | Part | Klank | Laag | Hoog |
@@ -198,11 +239,17 @@ Zonder `--midi` speelt het een korte demo. Handig om klanken te vergelijken of f
 - Ingebouwde klanken zijn synthesizers; voor een echte piano gebruik je een SFZ-bibliotheek of een VST3.
 - General MIDI-modus kiest per GM-familie een ingebouwde klank; kanaal 10 gebruikt het ingebouwde drumstel.
 - MIDI loopt via de standaard Windows-MIDI-API. Op Windows 11 gaat dat automatisch via Windows MIDI
-  Services (meerdere apps tegelijk op één keyboard). Echte MIDI 2.0-functies volgen in fase 3.
-- MIDI-uitgang naar hardware-synths, SysEx en MIDI-clock volgen in fase 3.
+  Services (meerdere apps tegelijk op één keyboard).
+- MIDI 2.0 op Windows: deze build gebruikt nog niet de Windows MIDI Services-SDK (die is nog in preview).
+  Windows levert MIDI 2.0-apparaten daardoor als MIDI 1.0 aan: ze werken, maar zonder hoge resolutie en
+  per-noot-expressie. Zodra de SDK stabiel is, kan de build hem aanzetten; de rest van de app is er klaar voor.
+  MPE-controllers werken wel volledig.
+- De notenbalk toont één stem per notenbalk (geen meerstemmigheid binnen één balk), geen triolen, en is
+  alleen-lezen. Drumsporen hebben nog geen slagwerknotatie.
+- MIDI-clock wordt alleen verstuurd, niet ontvangen (KlankModule volgt nog geen externe clock).
+- CLAP: geen polyfone modulatie en geen note-expressies van de plug-in terug; wel MPE via MIDI.
 - Audioclips inkorten (trimmen) en tijdrekken volgen later. Geleidelijke tempoveranderingen (accelerando) ook.
 - Akkoordherkenning werkt per maat; twee akkoorden binnen een maat worden nog niet apart herkend.
-- Nog te doen in fase 3: notenbalk en MIDI-uitgang naar hardware (3c), MIDI 2.0 en CLAP-plug-ins (3d).
 - Niet-opgeslagen wijzigingen van een performance vervallen als je naar een andere performance wisselt
   (wel bewaard bij afsluiten via de autosave). Sla op voor je wisselt.
 
@@ -215,6 +262,7 @@ Zie [Docs/ARCHITECTUUR.md](Docs/ARCHITECTUUR.md).
 | JUCE 8 | AGPLv3 of commercieel (gratis Starter-licentie tot een omzetgrens) |
 | sfizz | BSD-2-Clause |
 | VST3 SDK (via JUCE) | MIT |
+| CLAP SDK | MIT |
 | ASIO SDK (optioneel) | Propriëtair (gratis) of GPLv3 |
 | Catch2 (alleen tests) | BSL-1.0 |
 | Salamander Grand Piano (download) | CC-BY 3.0, Alexander Holm |

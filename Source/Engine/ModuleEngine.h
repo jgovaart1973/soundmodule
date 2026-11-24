@@ -4,6 +4,7 @@
 #include "Engine/Part.h"
 #include "Engine/Sequencer.h"
 #include "Midi/MidiEvent.h"
+#include "Midi/MidiOutHub.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
@@ -41,6 +42,9 @@ public:
     int getMaxBlockSize() const noexcept  { return maxBlock; }
 
     void requestPanic() noexcept       { panicRequested.store (true); }
+
+    /** Hardware MIDI outputs + clock (set once before audio starts; nullptr offline). */
+    void setMidiOutHub (MidiOutHub* hub) noexcept { midiOut = hub; }
     void startTestTone() noexcept      { testToneRemaining.store ((int) (sampleRate * 1.5)); }
 
     float getMasterPeakAndReset() noexcept { return masterPeak.exchange (0.0f); }
@@ -67,6 +71,7 @@ public:
 private:
     std::array<std::unique_ptr<Part>, kNumParts> parts;
     MidiEventQueue* liveQueue;
+    MidiOutHub* midiOut = nullptr;
 
     juce::AudioBuffer<float> mainBus, reverbBus, delayBus, deviceScratch;
     ReverbFx reverb;

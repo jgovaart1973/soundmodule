@@ -56,6 +56,38 @@ void Part::reclaimAll (juce::Array<Instrument*>& out) noexcept
 //==============================================================================
 void Part::beginBlock() noexcept
 {
+    adoptPending();
+
+    // MPE configuration for the current sound: when switched on/off, or when the sound changes.
+    const bool mpeOn = params.mpe.load (std::memory_order_relaxed);
+    if (current != nullptr && (current != mpeConfiguredFor || mpeOn != mpeConfiguredOn))
+    {
+        if (mpeOn || mpeConfiguredOn)
+            sendMpeConfiguration (mpeOn);
+        mpeConfiguredFor = current;
+        mpeConfiguredOn = mpeOn;
+    }
+}
+
+void Part::sendMpeConfiguration (bool on) noexcept
+{
+    auto cc = [this] (int ch, int number, int value)
+    {
+        const uint8_t m[3] = { (uint8_t) (0xb0 | ch), (uint8_t) number, (uint8_t) value };
+        sendToCurrent (m, 3, 0);
+    };
+    // MPE Configuration Message (RPN 6) on the manager channel: lower zone with 15 member channels.
+    cc (0, 101, 0); cc (0, 100, 6); cc (0, 6, on ? 15 : 0); cc (0, 38, 0);
+    // Pitch bend sensitivity (RPN 0): members +-48, manager +-2 (the MPE defaults)
+    for (int ch = 0; ch < 16; ++ch)
+    {
+        cc (ch, 101, 0); cc (ch, 100, 0); cc (ch, 6, (on && ch > 0) ? 48 : 2); cc (ch, 38, 0);
+        cc (ch, 101, 127); cc (ch, 100, 127);   // RPN null
+    }
+}
+
+void Part::adoptPending() noexcept
+{
     auto* p = pendingSlot.exchange (nullptr);
     if (p == nullptr)
         return;

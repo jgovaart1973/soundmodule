@@ -1,3 +1,4 @@
+#include "Engine/ExternalMidiInstrument.h"
 #include "Engine/InstrumentPool.h"
 
 #include "Engine/BuiltInDrums.h"
@@ -90,6 +91,9 @@ std::unique_ptr<Instrument> InstrumentPool::createSyncNoLoan (const InstrumentKe
             plugin->setStateBase64 (key.pluginState);
             return plugin;
         }
+
+        case InstrumentKey::Type::midiOut:
+            return std::make_unique<ExternalMidiInstrument> (midiOut, key);
 
         case InstrumentKey::Type::none:
             break;
@@ -197,6 +201,7 @@ void InstrumentPool::createAsync (const InstrumentKey& key, bool loaned, Callbac
         }
 
         case InstrumentKey::Type::builtIn:
+        case InstrumentKey::Type::midiOut:
         case InstrumentKey::Type::none:
         {
             juce::String error;

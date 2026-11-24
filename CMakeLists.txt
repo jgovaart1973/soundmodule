@@ -54,6 +54,13 @@ if(KM_WITH_SFIZZ)
     FetchContent_MakeAvailable(sfizz)
 endif()
 
+# CLAP SDK (header only, MIT) for hosting CLAP plug-ins
+FetchContent_Declare(clap
+    GIT_REPOSITORY https://github.com/free-audio/clap.git
+    GIT_TAG        1.2.6
+    GIT_SHALLOW    ON)
+FetchContent_MakeAvailable(clap)
+
 # ---------------------------------------------------------------------------
 # km_core: everything except the window/app entry points.
 # JUCE modules are linked PRIVATE and their include dirs/defines are re-exported,
@@ -74,11 +81,14 @@ target_sources(km_core PRIVATE
     Source/Engine/Sequencer.cpp
     Source/Engine/AudioCache.cpp
     Source/Midi/MidiRouter.cpp
+    Source/Midi/MidiOutHub.cpp
+    Source/Engine/ExternalMidiInstrument.cpp
     Source/Midi/MidiLearn.cpp
     Source/Model/Performance.cpp
     Source/Model/ProgramMap.cpp
     Source/Model/Song.cpp
     Source/Plugins/PluginScanner.cpp
+    Source/Plugins/ClapHosting.cpp
     Source/App/AppController.cpp
     Source/App/SongController.cpp
     Source/Render/OfflineRenderer.cpp
@@ -89,6 +99,7 @@ target_sources(km_core PRIVATE
     Source/UI/TopBar.cpp
     Source/UI/SettingsComponent.cpp
     Source/UI/PianoRoll.cpp
+    Source/UI/ScoreView.cpp
     Source/UI/ArrangerComponent.cpp
     Source/UI/MainComponent.cpp)
 
@@ -137,6 +148,7 @@ target_link_libraries(km_core
         juce::juce_dsp
         juce::juce_gui_extra
     PUBLIC
+        clap
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 
@@ -194,6 +206,11 @@ if(KM_BUILD_TESTS)
     target_compile_definitions(KmTestSynth PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
     target_link_libraries(KmTestSynth PRIVATE juce::juce_audio_processors juce::juce_recommended_config_flags)
 
+    # Tiny CLAP instrument (two plug-ins in one file) for the CLAP host tests.
+    add_library(KmTestClap MODULE Tests/TestClapPlugin/KmTestClap.cpp)
+    target_link_libraries(KmTestClap PRIVATE clap)
+    set_target_properties(KmTestClap PROPERTIES PREFIX "" SUFFIX ".clap" CXX_VISIBILITY_PRESET hidden)
+
     add_executable(km_tests
         Tests/TestPartFilter.cpp
         Tests/TestMidiQueue.cpp
@@ -204,10 +221,13 @@ if(KM_BUILD_TESTS)
         Tests/TestSequencer.cpp
         Tests/TestPluginHosting.cpp
         Tests/TestEditing.cpp
-        Tests/TestPhase3b.cpp)
+        Tests/TestPhase3b.cpp
+        Tests/TestPhase3c.cpp
+        Tests/TestPhase3d.cpp)
     target_link_libraries(km_tests PRIVATE km_core Catch2::Catch2WithMain)
-    add_dependencies(km_tests KmTestSynth_VST3)
+    add_dependencies(km_tests KmTestSynth_VST3 KmTestClap)
     target_compile_definitions(km_tests PRIVATE
+        KM_TEST_CLAP_PATH="$<TARGET_FILE:KmTestClap>"
         KM_TEST_PLUGIN_PATH="$<GENEX_EVAL:$<TARGET_PROPERTY:KmTestSynth_VST3,JUCE_PLUGIN_ARTEFACT_FILE>>")
 
     enable_testing() # not include(CTest): a dependency sets BUILD_TESTING=OFF

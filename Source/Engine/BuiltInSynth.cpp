@@ -154,13 +154,17 @@ namespace
     class KmVoice final : public juce::SynthesiserVoice
     {
     public:
-        explicit KmVoice (const std::atomic<int>& presetRef) : presetIndex (presetRef) {}
+        KmVoice (const std::atomic<int>& presetRef, const BuiltInSynth::Expression& ex) : presetIndex (presetRef), expr (ex) {}
 
         bool canPlaySound (juce::SynthesiserSound* s) override { return dynamic_cast<KmSound*> (s) != nullptr; }
 
         void startNote (int note, float velocity, juce::SynthesiserSound*, int pitchWheel) override
         {
             p = &presets[juce::jlimit (0, numPresets - 1, presetIndex.load())];
+            channel = 0;
+            for (int c = 1; c <= 16; ++c)
+                if (isPlayingChannel (c))
+                    channel = c - 1;
             sr = (float) getSampleRate();
             midiNote = note;
             vel = velocity;
@@ -217,7 +221,7 @@ namespace
 
         void pitchWheelMoved (int value) override
         {
-            bendSemis = ((float) value - 8192.0f) / 8192.0f * 2.0f;
+            bendSemis = ((float) value - 8192.0f) / 8192.0f * expr.bendRange[(size_t) channel];
         }
 
         void controllerMoved (int cc, int value) override
@@ -243,8 +247,13 @@ namespace
                 // Pitch: bend + vibrato (preset depth + mod wheel + pressure)
                 lfoPhase += lfoInc;
                 wrap (lfoPhase);
-                const float vibDepth = p->vibratoDepthSemis + modWheel * 0.35f + pressure * 0.15f;
-                const float semis = bendSemis + vibDepth * std::sin (twoPi * lfoPhase);
+                // MPE: pressure and timbre come per note (member channel); otherwise pressure adds vibrato.
+                const bool mpe = expr.mpe;
+                const float notePressure = mpe ? expr.pressure[(size_t) channel] : pressure;
+                const float vibDepth = p->vibratoDepthSemis + modWheel * 0.35f + (mpe ? 0.0f : pressure * 0.15f);
+                const float semis = bendSemis + (mpe ? expr.managerBend : 0.0f) + vibDepth * std::sin (twoPi * lfoPhase);
+                expressionGain = mpe ? 0.75f + 0.5f * notePressure : 1.0f;
+                brightness = (expr.timbre[(size_t) channel] - 0.5f) * 3.0f + (mpe ? notePressure * 1.5f : 0.0f);
                 const float freq = baseFreq * std::exp2 (semis / 12.0f);
 
                 const float a = ampEnv.getNextSample();
@@ -258,7 +267,7 @@ namespace
                     case Algo::organ:       sample = renderOrgan (freq);          break;
                 }
 
-                sample *= a * velGain * p->gain * 0.25f;
+                sample *= a * velGain * p->gain * 0.25f * expressionGain;
                 left[i] += sample * gainL;
                 if (right != nullptr)
                     right[i] += sample * gainR;
@@ -311,7 +320,7 @@ namespace
                 const float octaves = p->filterEnvOctaves * filterEnvValue
                                     + p->keyTrack * (float) (midiNote - 60) / 12.0f
                                     + p->velToFilterOct * (vel - 0.5f)
-                                    + pressure * 1.5f + modWheel * 0.5f;
+                                    + (expr.mpe ? 0.0f : pressure * 1.5f) + modWheel * 0.5f + brightness;
                 filter.setCoefficients (p->cutoffHz * std::exp2 (octaves), p->resonance, sr);
             }
             return filter.process (osc);
@@ -360,7 +369,10 @@ namespace
         }
 
         const std::atomic<int>& presetIndex;
+        const BuiltInSynth::Expression& expr;
         const SynthPreset* p = nullptr;
+        int channel = 0;
+        float expressionGain = 1.0f, brightness = 0.0f;
 
         float sr = 44100.0f;
         int midiNote = 60;
@@ -394,7 +406,7 @@ BuiltInSynth::BuiltInSynth (int presetIndex)
 {
     setPreset (presetIndex);
     for (int i = 0; i < 32; ++i)
-        synth.addVoice (new KmVoice (preset));
+        synth.addVoice (new KmVoice (preset, expression));
     synth.addSound (new KmSound());
     synth.setNoteStealingEnabled (true);
     key = InstrumentKey::builtIn (getPreset(), getPresetName (getPreset()));
@@ -408,11 +420,77 @@ void BuiltInSynth::setPreset (int index) noexcept
 void BuiltInSynth::prepare (double sampleRate, int)
 {
     synth.setCurrentPlaybackSampleRate (sampleRate);
+    filtered.ensureSize (4096);
+}
+
+void BuiltInSynth::preprocess (juce::MidiBuffer& midi) noexcept
+{
+    filtered.clear();
+    for (const auto meta : midi)
+    {
+        const auto* d = meta.data;
+        if (meta.numBytes < 2)
+        {
+            filtered.addEvent (d, meta.numBytes, meta.samplePosition);
+            continue;
+        }
+        const int ch = d[0] & 0x0f, type = d[0] & 0xf0;
+
+        if (type == 0xb0 && meta.numBytes >= 3)
+        {
+            const int cc = d[1], v = d[2];
+            if (cc == 101) { rpnMsb[(size_t) ch] = v; continue; }
+            if (cc == 100) { rpnLsb[(size_t) ch] = v; continue; }
+            if (cc == 6 || cc == 38)
+            {
+                const int rpn = rpnMsb[(size_t) ch] * 128 + rpnLsb[(size_t) ch];
+                if (cc == 6 && rpn == 0)
+                {
+                    expression.bendRange[(size_t) ch] = (float) juce::jlimit (0, 96, v);
+                }
+                else if (cc == 6 && rpn == 6 && ch == 0)
+                {
+                    // MPE Configuration Message, lower zone: v member channels (2..v+1)
+                    expression.mpe = v > 0;
+                    expression.bendRange[0] = 2.0f;
+                    for (int c = 1; c < 16; ++c)
+                        expression.bendRange[(size_t) c] = (v > 0 && c <= v) ? 48.0f : 2.0f;
+                    expression.managerBend = 0.0f;
+                }
+                continue;
+            }
+            if (cc == 74)
+                expression.timbre[(size_t) ch] = (float) v / 127.0f;
+            if (expression.mpe && ch == 0 && cc == 64)
+            {
+                for (int c = 1; c <= 16; ++c)       // manager channel sustain holds every note
+                    synth.handleSustainPedal (c, v >= 64);
+                continue;
+            }
+        }
+        else if (type == 0xd0)
+        {
+            expression.pressure[(size_t) ch] = (float) d[1] / 127.0f;
+        }
+        else if (type == 0xe0 && meta.numBytes >= 3 && expression.mpe && ch == 0)
+        {
+            const int value = d[1] | (d[2] << 7);
+            expression.managerBend = ((float) value - 8192.0f) / 8192.0f * expression.bendRange[0];
+            continue;
+        }
+        else if (type == 0x90 && meta.numBytes >= 3 && d[2] > 0 && expression.mpe)
+        {
+            // A new MPE note starts without pressure until the controller says otherwise.
+            expression.pressure[(size_t) ch] = 0.0f;
+        }
+        filtered.addEvent (d, meta.numBytes, meta.samplePosition);
+    }
 }
 
 void BuiltInSynth::process (juce::AudioBuffer<float>& stereoOut, juce::MidiBuffer& midi) noexcept
 {
-    synth.renderNextBlock (stereoOut, midi, 0, stereoOut.getNumSamples());
+    preprocess (midi);
+    synth.renderNextBlock (stereoOut, filtered, 0, stereoOut.getNumSamples());
 }
 
 void BuiltInSynth::allNotesOff() noexcept

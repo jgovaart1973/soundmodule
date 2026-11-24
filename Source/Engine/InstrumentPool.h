@@ -8,6 +8,7 @@
 
 namespace km
 {
+class MidiOutHub;
 /**
     Creates, caches and owns all instrument instances (message thread only).
 
@@ -25,6 +26,9 @@ public:
 
     /** Prepare every instance for a new sample rate / block size. Audio must be stopped. */
     void setAudioConfig (double sampleRate, int blockSize);
+
+    /** Hardware MIDI outputs for "MIDI-uit" sounds (nullptr = such sounds stay silent, e.g. offline). */
+    void setMidiOutHub (MidiOutHub* hub) noexcept { midiOut = hub; }
 
     /** Get an instance for key, marked as loaned. Callback runs on the message thread
         (immediately if a matching idle instance exists). */
@@ -49,6 +53,7 @@ public:
     int getNumInstances() const noexcept { return (int) entries.size(); }
 
 private:
+    MidiOutHub* midiOut = nullptr;
     struct Entry
     {
         std::unique_ptr<Instrument> instrument;

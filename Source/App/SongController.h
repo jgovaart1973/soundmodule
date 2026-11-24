@@ -84,6 +84,8 @@ public:
     /** Put a chord at a beat (replaces a chord that starts there). */
     void setChord (double beat, double length, int root, int type);
     void removeChord (double beat);
+    /** Key signature for the notation view (Song::autoKey = guess). */
+    void setKeySignature (int fifths);
     /** Recognise the chords played in a clip and put them on the chord track. @returns how many. */
     int detectChords (int track, int clip);
     /** Write the chord track as a new clip on a MIDI track (block chords, and/or a bass line). @returns clip index. */

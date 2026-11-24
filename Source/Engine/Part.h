@@ -37,6 +37,9 @@ struct PartParams
     std::atomic<int>   arpOctaves { 1 };
     std::atomic<float> arpGate { 0.6f };
     std::atomic<bool>  arpLatch { false };
+
+    // MPE (per-note expression): the part tells its sound "lower zone, 15 member channels, bend +-48"
+    std::atomic<bool>  mpe { false };
 };
 
 /** A Program Change that needs a decision on the message thread. */
@@ -102,6 +105,10 @@ private:
     enum Owner : uint8_t { none = 0, ownerCurrent = 1, ownerTail = 2 };
 
     void releaseTail() noexcept;
+    void adoptPending() noexcept;
+    void sendMpeConfiguration (bool on) noexcept;
+    Instrument* mpeConfiguredFor = nullptr;
+    bool mpeConfiguredOn = false;
     void sendToCurrent (const uint8_t* data, int size, int pos) noexcept;
     void sendToTail (const uint8_t* data, int size, int pos) noexcept;
     void record (const uint8_t* data, int size, int pos) noexcept;

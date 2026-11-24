@@ -40,7 +40,22 @@ jobs:
           Copy-Item README.md, Scripts\download_sounds.ps1 dist\
           Copy-Item demo.wav dist\
 
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'project\(KlankModule VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$version" "/DBuildDir=$((Resolve-Path build).Path)" installer\KlankModule.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item build\installer\*.exe dist\
+
       - uses: actions/upload-artifact@v4
         with:
           name: KlankModule-windows-x64
           path: dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KlankModule-setup
+          path: build/installer/*.exe

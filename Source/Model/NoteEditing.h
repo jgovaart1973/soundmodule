@@ -19,7 +19,8 @@ inline const std::vector<GridOption>& gridOptions()
 {
     static const std::vector<GridOption> options {
         { "1/4", 1.0 },        { "1/8", 0.5 },          { "1/16", 0.25 },     { "1/32", 0.125 },
-        { "1/8 triool", 1.0 / 3.0 }, { "1/16 triool", 1.0 / 6.0 }, { "1/2", 2.0 },      { "1 maat (4/4)", 4.0 }
+        { "1/8 triool", 1.0 / 3.0 }, { "1/16 triool", 1.0 / 6.0 }, { "1/2", 2.0 },      { "1 maat (4/4)", 4.0 },
+        { "1/4 triool", 2.0 / 3.0 }
     };
     return options;
 }

@@ -411,9 +411,14 @@ void PartRow::showInstrumentMenu()
     juce::PopupMenu menu, builtIn, plugins, recent;
 
     for (int p = 0; p < BuiltInSynth::getNumPresets(); ++p)
-        builtIn.addItem (100 + p, BuiltInSynth::getPresetName (p));
-    builtIn.addSeparator();
-    builtIn.addItem (100 + BuiltInDrums::presetIndex, "Drumstel (GM)");
+    {
+        if (p == 8)
+            builtIn.addSectionHeader ("Akoestische modellen");
+        builtIn.addItem (3000 + p, BuiltInSynth::getPresetName (p));
+    }
+    builtIn.addSectionHeader ("Drums");
+    for (int k = 0; k < BuiltInDrums::numKits; ++k)
+        builtIn.addItem (3000 + BuiltInDrums::firstRef + k, BuiltInDrums::getKitName (k));
     menu.addSubMenu ("Ingebouwde klanken", builtIn);
 
     menu.addItem (2, "SFZ-bibliotheek laden...", SfzInstrument::isAvailable());
@@ -488,11 +493,11 @@ void PartRow::showInstrumentMenu()
                 if (! self.controller.getPerformance().parts[(size_t) self.index].enabled)
                     self.controller.setPartEnabled (self.index, true);
             }
-            else if (result >= 100 && result < 200)
+            else if (result >= 3000 && result < 3200)
             {
-                const int preset = result - 100;
-                self.controller.setPartInstrument (self.index, InstrumentKey::builtIn (preset, preset == BuiltInDrums::presetIndex
-                                                                                                  ? juce::String ("Drumstel (GM)")
+                const int preset = result - 3000;
+                self.controller.setPartInstrument (self.index, InstrumentKey::builtIn (preset, BuiltInDrums::isDrumRef (preset)
+                                                                                                  ? BuiltInDrums::getKitName (preset - BuiltInDrums::firstRef)
                                                                                                   : BuiltInSynth::getPresetName (preset)));
                 if (! self.controller.getPerformance().parts[(size_t) self.index].enabled)
                     self.controller.setPartEnabled (self.index, true);

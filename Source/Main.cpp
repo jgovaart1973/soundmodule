@@ -71,6 +71,28 @@ public:
 
         juce::Desktop::getInstance().setGlobalScaleFactor ((float) controller->getSettings().getDoubleValue ("uiScale", 1.0));
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), new km::MainComponent (*controller));
+        openFromCommandLine (commandLine);
+    }
+
+    /** Double-clicked .kmsong / .kmperf file (file association from the installer). */
+    void openFromCommandLine (const juce::String& commandLine)
+    {
+        auto path = commandLine.trim().unquoted().trim();
+        if (path.isEmpty() || ! juce::File::isAbsolutePath (path))
+            return;
+        const juce::File file (path);
+        if (! file.existsAsFile() || controller == nullptr)
+            return;
+        if (file.hasFileExtension (".kmsong"))
+        {
+            if (controller->getSongController().loadSong (file))
+                if (auto* main = dynamic_cast<km::MainComponent*> (mainWindow != nullptr ? mainWindow->getContentComponent() : nullptr))
+                    main->showArrangerView (true);
+        }
+        else if (file.hasFileExtension (".kmperf"))
+        {
+            controller->loadPerformance (file);
+        }
     }
 
     void shutdown() override
@@ -86,8 +108,9 @@ public:
 
     void systemRequestedQuit() override { quit(); }
 
-    void anotherInstanceStarted (const juce::String&) override
+    void anotherInstanceStarted (const juce::String& commandLine) override
     {
+        openFromCommandLine (commandLine);
         if (mainWindow != nullptr)
         {
             mainWindow->setMinimised (false);

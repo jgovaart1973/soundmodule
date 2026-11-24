@@ -86,6 +86,11 @@ InstrumentKey InstrumentKey::fromVar (const juce::var& v)
     k.pluginState = get (v, "state", "").toString();
     if (k.ref.isEmpty())
         k.type = Type::none;
+    if (k.type == Type::builtIn && k.ref == "8")   // before version 0.4: 8 = the (electronic) drum kit
+    {
+        k.ref = "101";
+        k.displayName = "Drumstel Elektronisch";
+    }
     return k;
 }
 

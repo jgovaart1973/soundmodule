@@ -61,7 +61,7 @@ private:
 
     juce::Rectangle<int> paper;
     juce::Label keyLabel;
-    juce::ComboBox keyBox, gridBox;
+    juce::ComboBox keyBox, gridBox, voicesBox;
     juce::TextButton saveButton { "Opslaan als afbeelding..." };
     juce::ScrollBar vScroll { true };
     std::unique_ptr<juce::FileChooser> chooser;

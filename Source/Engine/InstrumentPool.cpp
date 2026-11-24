@@ -64,8 +64,8 @@ std::unique_ptr<Instrument> InstrumentPool::createSyncNoLoan (const InstrumentKe
     switch (key.type)
     {
         case InstrumentKey::Type::builtIn:
-            if (key.ref.getIntValue() == BuiltInDrums::presetIndex)
-                return std::make_unique<BuiltInDrums>();
+            if (BuiltInDrums::isDrumRef (key.ref.getIntValue()))
+                return std::make_unique<BuiltInDrums> (key.ref.getIntValue() - BuiltInDrums::firstRef);
             return std::make_unique<BuiltInSynth> (key.ref.getIntValue());
 
         case InstrumentKey::Type::sfz:

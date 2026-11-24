@@ -4,7 +4,19 @@ Een Windows x64-programma dat je pc verandert in een hoogwaardige **klankmodule 
 Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule), **fase 2a**
 (opnemen en arrangeren), **fase 2b** (pianorol, ongedaan maken), **fase 3a** (audiosporen en
 tempowisselingen), **fase 3b** (drumstel en drum-editor, arpeggiator, akkoordspoor), **fase 3c**
-(notenbalk, hardware-synths via MIDI-uit, MIDI-clock, SysEx) en **fase 3d** (MPE, MIDI 2.0, CLAP-plug-ins).
+(notenbalk, hardware-synths via MIDI-uit, MIDI-clock, SysEx), **fase 3d** (MPE, MIDI 2.0, CLAP-plug-ins)
+en **versie 0.4** (akoestische instrumenten, twee stemmen per notenbalk, triolen, installatieprogramma).
+
+## Installeren
+Download `KlankModule-0.4.0-setup-x64.exe` (GitHub > Releases) en start het. Je hebt geen
+beheerdersrechten nodig: standaard installeert het alleen voor jou (of kies *voor alle gebruikers*).
+Het installatieprogramma maakt een snelkoppeling in het Startmenu (en desgewenst op het bureaublad),
+koppelt `.kmsong`- en `.kmperf`-bestanden aan KlankModule (dubbelklik opent ze) en kan meteen de gratis
+concertvleugel downloaden. Verwijderen gaat via *Instellingen > Apps*; je eigen performances, nummers
+en instellingen blijven dan bewaard.
+
+Windows SmartScreen kan waarschuwen omdat het programma (nog) niet digitaal ondertekend is:
+kies *Meer informatie > Toch uitvoeren*.
 
 ## Wat het nu kan (fase 1)
 
@@ -89,6 +101,23 @@ Onder de liniaal staat het **tempospoor**.
 Een geïmporteerd MIDI-bestand krijgt per kanaal een spoor op de part met hetzelfde nummer.
 Parts zonder klank krijgen automatisch een passende ingebouwde klank.
 
+## Ingebouwde instrumenten (versie 0.4)
+Naast de 8 synthesizerklanken zijn er nu akoestische instrumenten. Ze gebruiken geen samples maar
+natuurkundige modellen, dus ze laden direct en kosten bijna geen geheugen:
+
+| Instrument | Hoe het werkt |
+| --- | --- |
+| Acoustic Grand Piano, Bright Piano | Snaarmodel: boventonen die iets te hoog liggen zoals bij een echte piano, twee snaren per toon (zweving), hamergeluid, demper bij loslaten (bovenste octaaf zonder demper), sustainpedaal |
+| Nylon Guitar, Steel Guitar, Clean Electric Guitar | Getokkelde snaar (Karplus-Strong) met plukplaats, klankkast (akoestisch) en demping bij loslaten |
+| Fretless Bass, Finger Bass | Fretless: glijdt de toon in met de typische "mwah"; Finger Bass: getokkelde snaar |
+| Soprano Sax, Alto Sax, Tenor Sax, Flute | Blaasmodel: ademruis, formanten per sax, harder spelen = helderder, toon die even onder de noot begint, vibrato dat na een moment invalt (modulatiewiel = meer vibrato) |
+| Choir Aahs, Choir Oohs | Vier zangers per toon, licht verstemd, op de klinkers "aa" en "oe" |
+| Drumstel Akoestisch, Drumstel Elektronisch | Akoestisch: vel-modellen, snarenmat, bekkens; Elektronisch: het analoge 808-achtige stel |
+
+General MIDI kiest deze instrumenten nu ook (piano 0-3, gitaren 24-28, bassen 32-35, koor 52-53,
+saxen 64-67, fluiten 72-79); een Program Change 25 op kanaal 10 kiest het elektronische drumstel.
+Oudere performances met "Drumstel (GM)" houden hun (elektronische) klank.
+
 ## Drums (fase 3b)
 - Nieuwe ingebouwde klank **Drumstel (GM)**: alle General MIDI-drumnoten (35-81) zijn gesynthetiseerd:
   kick, snare, rim, clap, hihats (een dichte hihat kapt de open af), toms, crash, ride, bell, percussie.
@@ -122,6 +151,14 @@ In de pianorol zet de knop **Notenbalk** de clip om in bladmuziek op een pianosy
 - Weergave in 1/8, 1/16 of 1/32: alleen de weergave wordt afgerond, het nummer blijft zoals het is.
 - Notenwaarden met punten en overbindingen, waardestrepen per tel (6/8 in groepjes van drie), voortekens
   die per maat blijven gelden, rusten, hulplijnen. Noten vanaf C4 staan in de G-sleutel.
+- **Twee stemmen per notenbalk**: een aangehouden noot boven een bewegende lijn (of andersom) wordt
+  netjes als bovenstem (stokken omhoog) en onderstem (stokken omlaag) geschreven, met de rusten uit
+  elkaars weg. Een akkoord blijft één akkoord. Kies *1 stem per balk* voor de eenvoudige weergave.
+- **Triolen** worden per tel vanzelf herkend: achtste- en zestiende-triolen, en kwart-triolen over
+  twee tellen, ook als ze niet precies gespeeld zijn. Ze krijgen een **3** (met haak als ze geen
+  gezamenlijke waardestreep hebben). Rechte noten blijven recht.
+- Triolen invoeren: kies in de pianorol het raster *1/4 triool*, *1/8 triool* of *1/16 triool* om
+  te tekenen en te quantizen; de arpeggiator heeft 1/8- en 1/16-triolen.
 - **Opslaan als afbeelding...** maakt een PNG om te printen. Ctrl+muiswiel zoomt.
 - Bewerken doe je in de pianorol of de drum-editor: de notenbalk volgt direct.
 
@@ -244,8 +281,10 @@ Zonder `--midi` speelt het een korte demo. Handig om klanken te vergelijken of f
   Windows levert MIDI 2.0-apparaten daardoor als MIDI 1.0 aan: ze werken, maar zonder hoge resolutie en
   per-noot-expressie. Zodra de SDK stabiel is, kan de build hem aanzetten; de rest van de app is er klaar voor.
   MPE-controllers werken wel volledig.
-- De notenbalk toont één stem per notenbalk (geen meerstemmigheid binnen één balk), geen triolen, en is
-  alleen-lezen. Drumsporen hebben nog geen slagwerknotatie.
+- De notenbalk is alleen-lezen, heeft maximaal twee stemmen per balk, alleen triolen (geen kwintolen e.d.)
+  en nog geen slagwerknotatie voor drumsporen.
+- De akoestische instrumenten zijn modellen, geen opnames: een goede SFZ-bibliotheek of plug-in klinkt
+  realistischer (zie *Gratis piano downloaden*).
 - MIDI-clock wordt alleen verstuurd, niet ontvangen (KlankModule volgt nog geen externe clock).
 - CLAP: geen polyfone modulatie en geen note-expressies van de plug-in terug; wel MPE via MIDI.
 - Audioclips inkorten (trimmen) en tijdrekken volgen later. Geleidelijke tempoveranderingen (accelerando) ook.

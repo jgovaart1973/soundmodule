@@ -24,6 +24,9 @@ public:
     void paint (juce::Graphics&) override;
     bool keyPressed (const juce::KeyPress&) override;
 
+    /** Switch between the module (false) and the arranger (true). */
+    void showArrangerView (bool show) { showArranger (show); }
+
 private:
     class PluginWindow;
     class ColumnHeader;

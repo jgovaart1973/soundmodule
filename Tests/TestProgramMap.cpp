@@ -6,9 +6,14 @@ using namespace km;
 
 TEST_CASE ("General MIDI families map to sensible built-in presets", "[programmap]")
 {
-    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (0) == 0);   // Acoustic Grand -> E-Piano
+    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (0) == 8);   // Acoustic Grand
+    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (4) == 0);   // Rhodes -> E-Piano
+    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (35) == 13); // Fretless
+    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (65) == 16); // Alto sax
+    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (52) == 19); // Choir
     REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (16) == 2);  // Drawbar Organ
-    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (33) == 3);  // Fingered Bass
+    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (33) == 14); // Fingered Bass
+    REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (38) == 3);  // Synth Bass
     REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (48) == 4);  // String Ensemble
     REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (61) == 5);  // Brass Section
     REQUIRE (ProgramMap::gmFamilyToBuiltInPreset (89) == 1);  // Warm Pad

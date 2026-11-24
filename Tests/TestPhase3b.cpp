@@ -38,10 +38,13 @@ namespace
     }
 } // namespace
 
-TEST_CASE ("Drum kit: every GM drum note sounds and dies out", "[drums]")
+TEST_CASE ("Drum kits: every GM drum note sounds and dies out", "[drums]")
 {
-    BuiltInDrums kit;
+  for (int kitIndex = 0; kitIndex < BuiltInDrums::numKits; ++kitIndex)
+  {
+    BuiltInDrums kit (kitIndex);
     kit.prepare (48000.0, 512);
+    INFO ("kit " << kitIndex);
     for (auto& row : gmDrumRows())
     {
         juce::AudioBuffer<float> buf (2, 512);
@@ -70,6 +73,7 @@ TEST_CASE ("Drum kit: every GM drum note sounds and dies out", "[drums]")
         tail = buf.getMagnitude (0, 512);
     }
     REQUIRE (tail < 1.0e-4f);
+  }
     REQUIRE (juce::String (gmDrumName (38)).isNotEmpty());
 }
 

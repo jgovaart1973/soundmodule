@@ -23,9 +23,9 @@ namespace
     }
 } // namespace
 
-BuiltInDrums::BuiltInDrums()
+BuiltInDrums::BuiltInDrums (int k) : kit (juce::jlimit (0, numKits - 1, k))
 {
-    key = InstrumentKey::builtIn (presetIndex, getName());
+    key = InstrumentKey::builtIn (firstRef + kit, getName());
 }
 
 void BuiltInDrums::prepare (double sampleRate, int)
@@ -139,7 +139,11 @@ float BuiltInDrums::renderVoice (Voice& v) noexcept
     auto env = [t] (float tau) { return std::exp (-t / tau); };
 
     float s = 0.0f;
-    switch (v.kind)
+    if (kit == 0 && renderAcoustic (v, s))
+    {
+        // acoustic kit handled the sound
+    }
+    else switch (v.kind)
     {
         case Kind::kick:
         {
@@ -203,6 +207,99 @@ float BuiltInDrums::renderVoice (Voice& v) noexcept
         v.active = false;
 
     return s * v.velocity * juce::jmax (0.0f, v.choke) * 0.55f;
+}
+
+bool BuiltInDrums::renderAcoustic (Voice& v, float& s) noexcept
+{
+    const float t = v.t;
+    auto env = [t] (float tau) { return std::exp (-t / tau); };
+    auto attack = [t] (float ms) { return juce::jmin (1.0f, t / (ms * 0.001f)); };
+    // Two independent resonators (state variable band-pass) for drum heads and snare wires.
+    auto bp = [this] (float& low, float& band, float x, float centre, float damping)
+    {
+        const float f = 2.0f * std::sin (juce::MathConstants<float>::pi * juce::jmin (centre, sr * 0.2f) / sr);
+        low += f * band;
+        const float high = x - low - damping * band;
+        band += f * high;
+        return band;
+    };
+    auto lowpass = [this] (float& state, float x, float hz)
+    {
+        state += (1.0f - std::exp (-juce::MathConstants<float>::twoPi * hz / sr)) * (x - state);
+        return state;
+    };
+    const float vel = v.velocity;
+
+    switch (v.kind)
+    {
+        case Kind::kick:
+        {
+            // Felt beater on a big head: pitch drops from ~100 to ~52 Hz, a soft click and a woofy body.
+            const float pitch = 52.0f + 50.0f * env (0.028f);
+            v.phase += pitch * dt;
+            if (v.phase >= 1.0f) v.phase -= 1.0f;
+            const float body = std::sin (twoPi * v.phase) * (0.75f * env (0.18f) + 0.25f * env (0.45f));
+            const float click = lowpass (v.lpState, noise(), 2500.0f + 3500.0f * vel) * env (0.0035f);
+            const float thump = bp (v.bpLow, v.bpBand, noise(), 85.0f, 0.4f) * env (0.05f);
+            s = 0.95f * body + (0.5f + 0.6f * vel) * click + 0.9f * thump;
+            return true;
+        }
+        case Kind::snare:
+        {
+            // Two head modes, a crack and the snare wires (brighter for harder hits).
+            v.phase += 182.0f * dt;  if (v.phase >= 1.0f) v.phase -= 1.0f;
+            v.phase2 += 336.0f * dt; if (v.phase2 >= 1.0f) v.phase2 -= 1.0f;
+            const float heads = 0.45f * std::sin (twoPi * v.phase) * env (0.07f) + 0.25f * std::sin (twoPi * v.phase2) * env (0.05f);
+            const float n = noise();
+            const float wires = bp (v.bpLow, v.bpBand, n, 3800.0f + 2500.0f * vel, 0.9f) * (0.6f * env (0.11f) + 0.4f * env (0.26f));
+            const float crack = (n - lowpass (v.lpState, n, 1500.0f)) * env (0.006f);
+            s = heads * attack (0.4f) + (0.9f + 0.4f * vel) * wires + 0.5f * vel * crack;
+            return true;
+        }
+        case Kind::tom:
+        {
+            const float pitch = v.freq * 1.15f * (1.0f + 0.12f * env (0.06f));
+            v.phase += pitch * dt;          if (v.phase >= 1.0f) v.phase -= 1.0f;
+            v.phase2 += pitch * 1.58f * dt; if (v.phase2 >= 1.0f) v.phase2 -= 1.0f;
+            const float heads = 0.6f * std::sin (twoPi * v.phase) * env (0.38f) + 0.18f * std::sin (twoPi * v.phase2) * env (0.16f);
+            const float stick = bp (v.bpLow, v.bpBand, noise(), 900.0f, 0.7f) * env (0.012f);
+            s = heads * attack (0.6f) + 0.5f * stick;
+            return true;
+        }
+        case Kind::hatClosed:
+        case Kind::hatPedal:
+        case Kind::hatOpen:
+        {
+            // Two thin cymbals: bright noise shaped by band-passes, plus a little metal.
+            const float n = noise();
+            const float sizzle = bp (v.bpLow, v.bpBand, n, 8500.0f, 0.6f) + 0.6f * bp (v.bp2Low, v.bp2Band, n, 11500.0f, 0.8f);
+            const float tau = v.kind == Kind::hatOpen ? 0.42f : v.kind == Kind::hatPedal ? 0.06f : 0.035f;
+            const float chick = v.kind == Kind::hatPedal ? 0.4f * bp (v.lp2, v.lpState, n, 1200.0f, 0.8f) * env (0.01f) : 0.0f;
+            s = (0.28f * sizzle + 0.12f * (std::fmod (6970.0f * t, 1.0f) - 0.5f)) * env (tau) * (0.6f + 0.4f * vel) + chick;
+            return true;
+        }
+        case Kind::crash:
+        {
+            const float n = noise();
+            const float wash = bp (v.bpLow, v.bpBand, n, 5200.0f, 0.5f) + 0.7f * bp (v.bp2Low, v.bp2Band, n, 9000.0f, 0.6f);
+            const float low = lowpass (v.lpState, n, 900.0f) * env (0.25f);
+            s = (0.38f * wash * (0.7f * env (0.9f) + 0.3f * env (2.2f)) + 0.6f * low) * attack (2.0f);
+            return true;
+        }
+        case Kind::ride:
+        {
+            // Ping (bell-like partials) over a quiet wash.
+            const float ping = 0.16f * (std::sin (twoPi * 2950.0f * t) + 0.7f * std::sin (twoPi * 4470.0f * t)
+                                        + 0.5f * std::sin (twoPi * 5600.0f * t)) * env (0.25f);
+            const float wash = bp (v.bpLow, v.bpBand, noise(), 6800.0f, 0.5f) * (0.5f * env (0.6f) + 0.5f * env (1.6f));
+            s = ping + 0.22f * wash;
+            return true;
+        }
+        case Kind::rim: case Kind::clap: case Kind::rideBell: case Kind::tambourine: case Kind::cowbell:
+        case Kind::shaker: case Kind::clave: case Kind::blip:
+            return false;
+    }
+    return false;
 }
 
 void BuiltInDrums::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi) noexcept

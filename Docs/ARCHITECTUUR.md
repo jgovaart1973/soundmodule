@@ -125,3 +125,20 @@ De audio-thread wacht nooit en alloceert niets:
   MIDI (als de plug-in dat dialect kent) of als CLAP-note-events; parameterwijzigingen van de host gaan via
   een wachtrij als param-value-events het audioblok in, wijzigingen van de plug-in komen via de out-events
   terug. Op Windows wordt het plug-invenster als win32-kindvenster ingebed (`HWNDComponent`).
+
+## Versie 0.4: instrumenten, stemmen, triolen, installatie
+- `Engine/SynthModels.h`: akoestische modellen voor de ingebouwde synth (allocatievrij, per sample):
+  `PianoModel` (modale synthese, struct-of-arrays zodat de compiler vectoriseert; uitgestorven
+  boventonen worden overgeslagen), `PluckModel` (uitgebreide Karplus-Strong met fractionele vertraging,
+  plukplaats-kam en klankkast), `WindModel` (ademgestuurde bron + formantfilters), `ChoirModel` (vier
+  verstemde stemmen + klinkerformanten), `FretlessModel`. Presets 8-20 in `BuiltInSynth`; de oude
+  nummers 0-7 blijven gelijk. Drumstellen hebben nu nummer 100 (akoestisch) en 101 (elektronisch);
+  `InstrumentKey::fromVar` zet het oude nummer 8 om naar 101.
+- `Model/Notation.h`: `detail::splitVoices` verdeelt de noten van een notenbalk over een boven- en
+  onderstem; `detail::findCells` bepaalt per tel (of per halve maat) of er recht of in triolen wordt
+  geschreven door de afrondingsfout op beide rasters te vergelijken. In een triool worden waarden in
+  "geschreven tijd" (3/2) verdeeld; `Item::start` blijft echte tijd zodat de ruimte klopt.
+  `Bar::tuplets` en `Bar::twoVoices` sturen de tekening in `ScoreView`.
+- `installer/KlankModule.iss` (Inno Setup 6): per gebruiker of voor iedereen, Startmenu, bureaublad,
+  bestandskoppelingen (.kmsong/.kmperf, geopend via de opdrachtregel en `anotherInstanceStarted`),
+  optioneel de piano downloaden. De CI bouwt `KlankModule-<versie>-setup-x64.exe`.

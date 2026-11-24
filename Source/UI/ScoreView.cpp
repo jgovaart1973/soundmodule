@@ -153,7 +153,15 @@ ScoreView::ScoreView()
     gridBox.addItem ("Weergave in 1/16", 2);
     gridBox.addItem ("Weergave in 1/32", 3);
     gridBox.setSelectedId (2, juce::dontSendNotification);
+    gridBox.setTooltip ("Afronding voor rechte noten; triolen worden per tel vanzelf herkend");
     gridBox.onChange = [this] { rebuild(); };
+
+    addAndMakeVisible (voicesBox);
+    voicesBox.addItem ("1 stem per balk", 1);
+    voicesBox.addItem ("2 stemmen per balk", 2);
+    voicesBox.setSelectedId (2, juce::dontSendNotification);
+    voicesBox.setTooltip ("Twee stemmen: een bovenstem (stokken omhoog) en een onderstem (stokken omlaag) per notenbalk");
+    voicesBox.onChange = [this] { rebuild(); };
 
     addAndMakeVisible (saveButton);
     saveButton.onClick = [this] { saveImage(); };
@@ -191,7 +199,7 @@ void ScoreView::rebuild()
     const double beatLength = beatUnit == 8 && beatsPerBar % 3 == 0 && beatsPerBar > 3 ? 1.5 : 4.0 / beatUnit;
     const int key = keySetting == Song::autoKey ? notation::guessKey (notes) : keySetting;
     const double grid = gridBox.getSelectedId() == 1 ? 0.5 : gridBox.getSelectedId() == 3 ? 0.125 : 0.25;
-    layout = notation::layout (notes, clipLength, barLength, beatLength, key, grid);
+    layout = notation::layout (notes, clipLength, barLength, beatLength, key, grid, 60, voicesBox.getSelectedId() == 1 ? 1 : 2);
     keyBox.changeItemText (1, "Automatisch (" + notation::keyName (key).upToFirstOccurrenceOf (" /", false, false) + ")");
     resized();
     repaint();
@@ -249,6 +257,8 @@ void ScoreView::resized()
     keyBox.setBounds (bar.removeFromLeft (230));
     bar.removeFromLeft (8);
     gridBox.setBounds (bar.removeFromLeft (170));
+    bar.removeFromLeft (8);
+    voicesBox.setBounds (bar.removeFromLeft (170));
     bar.removeFromLeft (8);
     saveButton.setBounds (bar.removeFromLeft (200));
     vScroll.setBounds (r.removeFromRight (14));
@@ -419,6 +429,9 @@ void ScoreView::drawStaffItems (juce::Graphics& g, const Geometry& G, const nota
                     ++count;
                 }
         stemUp[i] = count == 0 || sum / count < 4.0;
+        // Two voices on one staff: upper voice stems up, lower voice stems down.
+        if (bar.twoVoices[(size_t) staff])
+            stemUp[i] = items[i].voice == 0;
     }
 
     g.setColour (ink);
@@ -430,9 +443,11 @@ void ScoreView::drawStaffItems (juce::Graphics& g, const Geometry& G, const nota
         if (it.rest)
         {
             const bool wholeBar = it.value.denominator == 1;
-            drawRest (g, wholeBar ? barX + barW * 0.5f - 0.3f * sp : x + 0.5f * headW, staffTop, sp, it.value.denominator);
+            // With two voices the rests move out of each other's way: upper voice higher, lower voice lower.
+            const float shift = bar.twoVoices[(size_t) staff] ? (it.voice == 0 ? -2.0f * sp : 2.0f * sp) : 0.0f;
+            drawRest (g, wholeBar ? barX + barW * 0.5f - 0.3f * sp : x + 0.5f * headW, staffTop + shift, sp, it.value.denominator);
             if (it.value.dotted)
-                g.fillEllipse (x + headW + 0.5f * sp, yOf (staffTop, sp, 5) - 0.2f * sp, 0.4f * sp, 0.4f * sp);
+                g.fillEllipse (x + headW + 0.5f * sp, yOf (staffTop + shift, sp, 5) - 0.2f * sp, 0.4f * sp, 0.4f * sp);
             continue;
         }
 
@@ -475,7 +490,7 @@ void ScoreView::drawStaffItems (juce::Graphics& g, const Geometry& G, const nota
             {
                 float endX = barX + barW + padLeftSp * sp * 0.6f;
                 for (size_t j = i + 1; j < items.size(); ++j)
-                    if (! items[j].rest)
+                    if (! items[j].rest && items[j].voice == it.voice)
                     {
                         endX = xOf (items[j]) + headW * 0.2f;
                         break;
@@ -577,6 +592,52 @@ void ScoreView::drawStaffItems (juce::Graphics& g, const Geometry& G, const nota
         g.drawLine (st.x, st.yHead, st.x, st.yEnd, juce::jmax (1.0f, 0.13f * sp));
         if (items[i].beamGroup < 0)
             drawFlags (g, st.x, st.yEnd, st.up, items[i].value.denominator, sp);
+    }
+
+    // Triplets: a "3" (with a bracket unless the notes share one beam) on the stem side.
+    const auto& tuplets = bar.tuplets[(size_t) staff];
+    for (int t = 0; t < (int) tuplets.size(); ++t)
+    {
+        float x0 = 1.0e9f, x1 = -1.0e9f, top = staffTop - sp, bottom = staffTop + 5.0f * sp;
+        int upVotes = 0, count = 0, beam = -2;
+        bool oneBeam = true;
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            if (items[i].tuplet != t)
+                continue;
+            const float x = xOf (items[i]);
+            x0 = juce::jmin (x0, x);
+            x1 = juce::jmax (x1, x + headW);
+            ++count;
+            if (items[i].rest)
+            {
+                oneBeam = false;
+                continue;
+            }
+            upVotes += stemUp[i] ? 1 : -1;
+            top = juce::jmin (top, juce::jmin (stems[i].yEnd, stems[i].yHead - sp));
+            bottom = juce::jmax (bottom, juce::jmax (stems[i].yEnd, stems[i].yHead + sp));
+            if (beam == -2)
+                beam = items[i].beamGroup;
+            oneBeam = oneBeam && items[i].beamGroup >= 0 && items[i].beamGroup == beam;
+        }
+        if (count == 0)
+            continue;
+        const bool above = tuplets[(size_t) t].voice == 0 ? upVotes >= 0 : false;
+        const float y = above ? top - 1.4f * sp : bottom + 1.4f * sp;
+        const float mid = 0.5f * (x0 + x1);
+        g.setFont (juce::FontOptions (1.6f * sp, juce::Font::bold | juce::Font::italic));
+        const juce::Rectangle<float> label (mid - 0.8f * sp, y - 0.9f * sp, 1.6f * sp, 1.8f * sp);
+        if (! oneBeam)
+        {
+            const float hook = above ? 0.6f * sp : -0.6f * sp;
+            const float lw = juce::jmax (1.0f, 0.1f * sp);
+            g.drawLine (x0, y + hook, x0, y, lw);
+            g.drawLine (x0, y, label.getX() - 0.1f * sp, y, lw);
+            g.drawLine (label.getRight() + 0.1f * sp, y, x1, y, lw);
+            g.drawLine (x1, y, x1, y + hook, lw);
+        }
+        g.drawText ("3", label, juce::Justification::centred);
     }
 }
 

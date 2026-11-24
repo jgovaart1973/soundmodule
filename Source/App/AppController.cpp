@@ -2,6 +2,7 @@
 #include "Plugins/ClapHosting.h"
 
 #include "Core/AppPaths.h"
+#include "Engine/BuiltInDrums.h"
 #include "Engine/BuiltInSynth.h"
 #include "Plugins/PluginScanner.h"
 
@@ -579,8 +580,14 @@ void AppController::handleProgramRequest (const ProgramRequest& req)
     auto* inst = assigned[(size_t) part];
     if (inst != nullptr && inst->key.type != InstrumentKey::Type::builtIn)
         return; // plug-ins / SFZ handle Program Change themselves
-    if (inst != nullptr && inst->key.ref.getIntValue() == 8)
-        return; // the built-in drum kit has one kit; Program Change is ignored like on most GM drum channels
+    if (inst != nullptr && BuiltInDrums::isDrumRef (inst->key.ref.getIntValue()))
+    {
+        // GM/GS drum channel: Program Change picks a kit (25 = electronic), never a melodic sound.
+        const int kit = BuiltInDrums::kitForProgram (req.program);
+        if (kit != inst->key.ref.getIntValue() - BuiltInDrums::firstRef)
+            setPartInstrument (part, InstrumentKey::builtIn (BuiltInDrums::firstRef + kit, BuiltInDrums::getKitName (kit)));
+        return;
+    }
 
     const int preset = gmMode ? ProgramMap::gmFamilyToBuiltInPreset (req.program)
                               : req.program % BuiltInSynth::getNumPresets();

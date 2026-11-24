@@ -775,7 +775,7 @@ int SongController::importMidi (const juce::File& file, juce::String& error)
 
         if (drumChannel)
         {
-            app.setPartInstrument (part, InstrumentKey::builtIn (BuiltInDrums::presetIndex, "Drumstel (GM)"));
+            app.setPartInstrument (part, InstrumentKey::builtIn (BuiltInDrums::presetIndex, BuiltInDrums::getKitName (0)));
             app.setPartEnabled (part, true);
             song.tracks[t].name = song.tracks[t].name + " (Drumstel)";
             continue;

@@ -1,4 +1,5 @@
 #include "Engine/BuiltInSynth.h"
+#include "Engine/SynthModels.h"
 
 #include <cmath>
 
@@ -8,7 +9,7 @@ namespace
 {
     constexpr float twoPi = juce::MathConstants<float>::twoPi;
 
-    enum class Algo { subtractive, fm, organ };
+    enum class Algo { subtractive, fm, organ, piano, pluck, wind, choir, fretless };
 
     struct SynthPreset
     {
@@ -37,7 +38,12 @@ namespace
 
         float vibratoDepthSemis; ///< permanent vibrato (mod wheel adds more)
         float gain;
+
+        // Acoustic models (see SynthModels.h): meaning depends on the algorithm
+        float model[8] {};
     };
+
+    constexpr float PIANO_GAIN = 2.6f, PLUCK_GAIN = 1.7f;
 
     // clang-format off
     const SynthPreset presets[] =
@@ -89,6 +95,51 @@ namespace
           { 0.005f, 0.2f, 0.9f, 0.15f }, { 0.002f, 0.3f, 0.6f, 0.2f },
           0, 0, 0, 0, 0,
           { 0, 0, 0, 0, 0, 0 }, 0.0f, 1.03f },
+
+        // --- acoustic models (phase 4) ------------------------------------------------
+        // piano: model = { brightness, decay scale }
+        { "Acoustic Grand Piano", Algo::piano, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.001f, 0.0f, 1.0f, 0.3f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, PIANO_GAIN, { 1.0f, 1.0f } },
+        { "Bright Piano", Algo::piano, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.001f, 0.0f, 1.0f, 0.3f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, PIANO_GAIN * 1.45f, { 1.6f, 0.85f } },
+        // pluck: model = { brightness, decay (s), pluck position, body, tone (Hz) }
+        { "Nylon Guitar", Algo::pluck, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.001f, 0.0f, 1.0f, 0.3f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, PLUCK_GAIN * 1.1f, { 0.12f, 4.0f, 0.18f, 0.8f, 3600.0f } },
+        { "Steel Guitar", Algo::pluck, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.001f, 0.0f, 1.0f, 0.3f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, PLUCK_GAIN, { 0.8f, 5.0f, 0.12f, 0.55f, 9000.0f } },
+        { "Clean Electric Guitar", Algo::pluck, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.001f, 0.0f, 1.0f, 0.3f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, PLUCK_GAIN, { 0.65f, 7.0f, 0.22f, 0.0f, 4200.0f } },
+        { "Fretless Bass", Algo::fretless, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.006f, 2.5f, 0.35f, 0.12f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.03f, 0.95f },
+        { "Finger Bass", Algo::pluck, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.001f, 0.0f, 1.0f, 0.3f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, PLUCK_GAIN * 1.4f, { 0.08f, 5.0f, 0.22f, 0.0f, 1200.0f } },
+        // wind: model = { F1, F2, F3, formant mix, breath, scoop (cents), vibrato (cents), sine source }
+        { "Soprano Sax", Algo::wind, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.025f, 0.2f, 0.85f, 0.08f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, 0.25f, { 720.0f, 1850.0f, 3100.0f, 0.75f, 0.05f, 25.0f, 14.0f, 0.0f } },
+        { "Alto Sax", Algo::wind, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.03f, 0.2f, 0.85f, 0.09f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, 0.15f, { 520.0f, 1500.0f, 2600.0f, 0.8f, 0.06f, 35.0f, 16.0f, 0.0f } },
+        { "Tenor Sax", Algo::wind, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.035f, 0.2f, 0.85f, 0.1f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, 0.2f, { 420.0f, 1250.0f, 2350.0f, 0.8f, 0.07f, 40.0f, 18.0f, 0.0f } },
+        { "Flute", Algo::wind, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.05f, 0.2f, 0.9f, 0.12f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, 0.4f, { 0, 0, 0, 0.0f, 0.14f, 12.0f, 14.0f, 1.0f } },
+        // choir: model = { F1, F2, F3, breath }
+        { "Choir Aahs", Algo::choir, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.25f, 0.5f, 0.9f, 0.5f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, 0.3f, { 760.0f, 1150.0f, 2850.0f, 0.04f } },
+        { "Choir Oohs", Algo::choir, 1, 0, 0, 0, 12000, 0, 0, 0, 0,
+          { 0.25f, 0.5f, 0.9f, 0.5f }, { 0.001f, 0.1f, 1.0f, 0.1f }, 0, 0, 0, 0, 0,
+          { 0, 0, 0, 0, 0, 0 }, 0.0f, 0.3f, { 380.0f, 760.0f, 2700.0f, 0.04f } },
     };
     // clang-format on
 
@@ -202,7 +253,23 @@ namespace
 
             filter.reset();
             coefCountdown = 0;
+
+            const auto& m = p->model;
+            switch (p->algo)
+            {
+                case Algo::piano:    piano.start (note, velocity, sr, m[0], m[1]); break;
+                case Algo::pluck:    pluck.start (note, velocity, sr, { m[0], m[1], m[2], m[3], m[4] }); break;
+                case Algo::wind:     wind.start (note, velocity, sr, { m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7] > 0.5f, 1.0f }); break;
+                case Algo::choir:    choir.start (note, velocity, sr, { m[0], m[1], m[2], m[3] }); break;
+                case Algo::fretless: fretless.start (note, velocity, sr); break;
+                case Algo::subtractive:
+                case Algo::fm:
+                case Algo::organ:
+                    break;
+            }
         }
+
+        bool ownEnvelope() const noexcept { return p != nullptr && (p->algo == Algo::piano || p->algo == Algo::pluck); }
 
         void stopNote (float, bool allowTailOff) override
         {
@@ -210,6 +277,8 @@ namespace
             {
                 ampEnv.noteOff();
                 filtEnv.noteOff();
+                if (p != nullptr && p->algo == Algo::piano) piano.release();
+                if (p != nullptr && p->algo == Algo::pluck) pluck.release();
             }
             else
             {
@@ -242,6 +311,13 @@ namespace
             auto* right = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
             const float lfoInc = 5.5f / sr;
 
+            if (p->algo == Algo::piano || p->algo == Algo::pluck || p->algo == Algo::wind
+                || p->algo == Algo::choir || p->algo == Algo::fretless)
+            {
+                renderModel (left, right, start, num);
+                return;
+            }
+
             for (int i = start; i < start + num; ++i)
             {
                 // Pitch: bend + vibrato (preset depth + mod wheel + pressure)
@@ -265,6 +341,7 @@ namespace
                     case Algo::subtractive: sample = renderSubtractive (freq, f); break;
                     case Algo::fm:          sample = renderFm (freq);             break;
                     case Algo::organ:       sample = renderOrgan (freq);          break;
+                    case Algo::piano: case Algo::pluck: case Algo::wind: case Algo::choir: case Algo::fretless: break;
                 }
 
                 sample *= a * velGain * p->gain * 0.25f * expressionGain;
@@ -284,6 +361,50 @@ namespace
         }
 
     private:
+        void renderModel (float* left, float* right, int start, int num) noexcept
+        {
+            const bool mpe = expr.mpe;
+            const float notePressure = mpe ? expr.pressure[(size_t) channel] : pressure;
+            expressionGain = mpe ? 0.75f + 0.5f * notePressure : 1.0f;
+            const float ratio = std::exp2 ((bendSemis + (mpe ? expr.managerBend : 0.0f)) / 12.0f);
+            if (p->algo == Algo::piano)
+                piano.setRatio (ratio);
+            if (p->algo == Algo::pluck)
+                pluck.setRatio (ratio);
+            const float gain = velGain * p->gain * 0.25f * expressionGain;
+            const bool own = ownEnvelope();
+
+            for (int i = start; i < start + num; ++i)
+            {
+                const float a = own ? 1.0f : ampEnv.getNextSample();
+                float sample = 0.0f;
+                switch (p->algo)
+                {
+                    case Algo::piano:    sample = piano.render(); break;
+                    case Algo::pluck:    sample = pluck.render(); break;
+                    case Algo::wind:     sample = wind.render (ratio, a, modWheel * 0.5f + (mpe ? 0.0f : pressure * 0.3f)); break;
+                    case Algo::choir:    sample = choir.render (ratio, a); break;
+                    case Algo::fretless: sample = fretless.render (ratio); break;
+                    case Algo::subtractive:
+                    case Algo::fm:
+                    case Algo::organ:
+                        break;
+                }
+                sample *= a * gain;
+                left[i] += sample * gainL;
+                if (right != nullptr)
+                    right[i] += sample * gainR;
+
+                const bool finished = own ? (p->algo == Algo::piano ? piano.isDone() : pluck.isDone())
+                                          : ! ampEnv.isActive();
+                if (finished)
+                {
+                    clearCurrentNote();
+                    break;
+                }
+            }
+        }
+
         float renderSubtractive (float freq, float filterEnvValue) noexcept
         {
             float osc = 0.0f;
@@ -391,6 +512,12 @@ namespace
 
         juce::ADSR ampEnv, filtEnv;
         SvfLowpass filter;
+
+        models::PianoModel piano;
+        models::PluckModel pluck;
+        models::WindModel wind;
+        models::ChoirModel choir;
+        models::FretlessModel fretless;
     };
 } // namespace
 

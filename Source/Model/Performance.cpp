@@ -109,6 +109,14 @@ juce::var PartConfig::toVar() const
     o->setProperty ("delaySend", delaySend);
     o->setProperty ("mute", mute);
     o->setProperty ("solo", solo);
+    auto* arp = new juce::DynamicObject();
+    arp->setProperty ("on", arpOn);
+    arp->setProperty ("mode", arpMode);
+    arp->setProperty ("rate", arpRate);
+    arp->setProperty ("octaves", arpOctaves);
+    arp->setProperty ("gate", arpGate);
+    arp->setProperty ("latch", arpLatch);
+    o->setProperty ("arpeggiator", juce::var (arp));
     return juce::var (o);
 }
 
@@ -133,6 +141,13 @@ PartConfig PartConfig::fromVar (const juce::var& v)
     p.delaySend = getF (v, "delaySend", 0.0f, 0.0f, 1.0f);
     p.mute = (bool) get (v, "mute", false);
     p.solo = (bool) get (v, "solo", false);
+    const auto arp = get (v, "arpeggiator", {});
+    p.arpOn = (bool) get (arp, "on", false);
+    p.arpMode = getI (arp, "mode", 0, 0, 5);
+    p.arpRate = getI (arp, "rate", 1, 0, 5);
+    p.arpOctaves = getI (arp, "octaves", 1, 1, 4);
+    p.arpGate = getF (arp, "gate", 0.6f, 0.05f, 1.0f);
+    p.arpLatch = (bool) get (arp, "latch", false);
     return p;
 }
 

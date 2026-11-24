@@ -1,6 +1,8 @@
 #include "UI/PartRow.h"
 
 #include "Core/AppPaths.h"
+#include "Engine/Arpeggiator.h"
+#include "Engine/BuiltInDrums.h"
 #include "Engine/BuiltInSynth.h"
 #include "Engine/SfzInstrument.h"
 #include "UI/KmLookAndFeel.h"
@@ -61,7 +63,7 @@ void ActivityLamp::paint (juce::Graphics& g)
 juce::Array<std::pair<juce::String, int>> PartRow::getColumns()
 {
     juce::Array<std::pair<juce::String, int>> cols;
-    for (auto& c : std::initializer_list<std::pair<const char*, int>> { { "", 30 }, { "#", 26 }, { "MIDI-ingang", 150 }, { "Kanaal", 74 }, { "Klank", 210 }, { "", 46 },
+    for (auto& c : std::initializer_list<std::pair<const char*, int>> { { "", 30 }, { "#", 26 }, { "MIDI-ingang", 150 }, { "Kanaal", 74 }, { "Klank", 210 }, { "", 46 }, { "", 44 },
              { "Volume", 140 }, { "Pan", 40 }, { "Transp.", 64 }, { "Laag", 64 }, { "Hoog", 64 },
              { "Vel. min", 56 }, { "Vel. max", 56 }, { "Curve", 84 }, { "Galm", 40 }, { "Delay", 40 },
              { "", 30 }, { "", 30 }, { "", 70 } })
@@ -110,6 +112,11 @@ PartRow::PartRow (AppController& c, int i)
     editorButton.setTooltip ("Origineel plug-in-venster openen of naar voren halen om live te bewerken");
     editorButton.setColour (juce::TextButton::buttonOnColourId, colours::accent);
     editorButton.onClick = [this] { if (onOpenEditor) onOpenEditor (index); };
+
+    addAndMakeVisible (arpButton);
+    arpButton.setTooltip ("Arpeggiator: aan/uit en instellingen");
+    arpButton.setColour (juce::TextButton::buttonOnColourId, colours::learn);
+    arpButton.onClick = [this] { showArpPanel(); };
 
     auto setupKnob = [this] (juce::Slider& s, double lo, double hi, double def, const juce::String& tip)
     {
@@ -301,9 +308,100 @@ void PartRow::tick()
     sync (delay, params.delaySend.load());
     muteButton.setToggleState (params.mute.load(), juce::dontSendNotification);
     editorButton.setToggleState (isEditorOpen != nullptr && isEditorOpen (index), juce::dontSendNotification);
+    arpButton.setToggleState (params.arpOn.load(), juce::dontSendNotification);
 
     for (auto* s : { &volume, &pan, &reverb, &delay })
         s->refreshLearnState();
+}
+
+//==============================================================================
+namespace
+{
+    /** Arpeggiator settings of one part, shown in a call-out bubble under the Arp button. */
+    class ArpPanel final : public juce::Component
+    {
+    public:
+        ArpPanel (AppController& c, int part) : controller (c), params (c.partParams (part))
+        {
+            addAndMakeVisible (onButton);
+            onButton.setButtonText ("Arpeggiator aan");
+            onButton.setToggleState (params.arpOn.load(), juce::dontSendNotification);
+            onButton.onClick = [this] { params.arpOn = onButton.getToggleState(); controller.markDirty(); };
+
+            addAndMakeVisible (mode);
+            mode.addItemList (Arpeggiator::modeNames(), 1);
+            mode.setSelectedId (params.arpMode.load() + 1, juce::dontSendNotification);
+            mode.onChange = [this] { params.arpMode = mode.getSelectedId() - 1; controller.markDirty(); };
+
+            addAndMakeVisible (rate);
+            for (int i = 0; i < (int) Arpeggiator::rates().size(); ++i)
+                rate.addItem (Arpeggiator::rates()[(size_t) i].name, i + 1);
+            rate.setSelectedId (params.arpRate.load() + 1, juce::dontSendNotification);
+            rate.onChange = [this] { params.arpRate = rate.getSelectedId() - 1; controller.markDirty(); };
+
+            addAndMakeVisible (octaves);
+            octaves.setSliderStyle (juce::Slider::IncDecButtons);
+            octaves.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 40, 22);
+            octaves.setRange (1, 4, 1);
+            octaves.setValue (params.arpOctaves.load(), juce::dontSendNotification);
+            octaves.onValueChange = [this] { params.arpOctaves = (int) octaves.getValue(); controller.markDirty(); };
+
+            addAndMakeVisible (gate);
+            gate.setSliderStyle (juce::Slider::LinearHorizontal);
+            gate.setTextBoxStyle (juce::Slider::TextBoxRight, false, 48, 22);
+            gate.setRange (5.0, 100.0, 1.0);
+            gate.textFromValueFunction = [] (double v) { return juce::String ((int) v) + "%"; };
+            gate.setValue (params.arpGate.load() * 100.0, juce::dontSendNotification);
+            gate.updateText();
+            gate.onValueChange = [this] { params.arpGate = (float) gate.getValue() / 100.0f; controller.markDirty(); };
+
+            addAndMakeVisible (latch);
+            latch.setButtonText ("Latch (blijft spelen na loslaten)");
+            latch.setToggleState (params.arpLatch.load(), juce::dontSendNotification);
+            latch.onClick = [this] { params.arpLatch = latch.getToggleState(); controller.markDirty(); };
+
+            for (auto [label, text] : { std::pair<juce::Label*, const char*> { &modeLabel, "Volgorde" }, { &rateLabel, "Snelheid" },
+                                        { &octLabel, "Octaven" }, { &gateLabel, "Lengte" } })
+            {
+                addAndMakeVisible (*label);
+                label->setText (text, juce::dontSendNotification);
+                label->setColour (juce::Label::textColourId, colours::textDim);
+            }
+            setSize (300, 210);
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (10);
+            onButton.setBounds (r.removeFromTop (26));
+            r.removeFromTop (6);
+            auto row = [&r] (juce::Label& l, juce::Component& c)
+            {
+                auto line = r.removeFromTop (28);
+                l.setBounds (line.removeFromLeft (80));
+                c.setBounds (line);
+                r.removeFromTop (4);
+            };
+            row (modeLabel, mode);
+            row (rateLabel, rate);
+            row (octLabel, octaves);
+            row (gateLabel, gate);
+            latch.setBounds (r.removeFromTop (26));
+        }
+
+    private:
+        AppController& controller;
+        PartParams& params;
+        juce::ToggleButton onButton, latch;
+        juce::ComboBox mode, rate;
+        juce::Slider octaves, gate;
+        juce::Label modeLabel, rateLabel, octLabel, gateLabel;
+    };
+} // namespace
+
+void PartRow::showArpPanel()
+{
+    juce::CallOutBox::launchAsynchronously (std::make_unique<ArpPanel> (controller, index), arpButton.getScreenBounds(), nullptr);
 }
 
 //==============================================================================
@@ -313,6 +411,8 @@ void PartRow::showInstrumentMenu()
 
     for (int p = 0; p < BuiltInSynth::getNumPresets(); ++p)
         builtIn.addItem (100 + p, BuiltInSynth::getPresetName (p));
+    builtIn.addSeparator();
+    builtIn.addItem (100 + BuiltInDrums::presetIndex, "Drumstel (GM)");
     menu.addSubMenu ("Ingebouwde klanken", builtIn);
 
     menu.addItem (2, "SFZ-bibliotheek laden...", SfzInstrument::isAvailable());
@@ -369,7 +469,9 @@ void PartRow::showInstrumentMenu()
             else if (result >= 100 && result < 200)
             {
                 const int preset = result - 100;
-                self.controller.setPartInstrument (self.index, InstrumentKey::builtIn (preset, BuiltInSynth::getPresetName (preset)));
+                self.controller.setPartInstrument (self.index, InstrumentKey::builtIn (preset, preset == BuiltInDrums::presetIndex
+                                                                                                  ? juce::String ("Drumstel (GM)")
+                                                                                                  : BuiltInSynth::getPresetName (preset)));
                 if (! self.controller.getPerformance().parts[(size_t) self.index].enabled)
                     self.controller.setPartEnabled (self.index, true);
             }
@@ -410,7 +512,7 @@ void PartRow::chooseSfzFile()
 void PartRow::resized()
 {
     auto area = getLocalBounds().reduced (4, 6);
-    juce::Component* comps[] = { &enableButton, &numberLabel, &inputBox, &channelBox, &instrumentButton, &editorButton,
+    juce::Component* comps[] = { &enableButton, &numberLabel, &inputBox, &channelBox, &instrumentButton, &editorButton, &arpButton,
                                  &volume, &pan, &transpose, &keyLow, &keyHigh, &velLow, &velHigh, &curveBox,
                                  &reverb, &delay, &muteButton, &soloButton, &meter };
     const auto columns = getColumns();

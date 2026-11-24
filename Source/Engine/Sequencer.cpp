@@ -321,6 +321,7 @@ int Sequencer::generate (int n, MidiEvent* out, int* positions, int maxEvents) n
 
     // Follow the song's tempo map (tempo taken at the start of the block).
     bps = (current != nullptr ? current->tempoAt (position.load()) : bpm.load()) / 60.0 / sampleRate;
+    tempoBps = bps;
 
     auto addClicks = [&] (double from, double to, double mapBeat, int posOffset)
     {

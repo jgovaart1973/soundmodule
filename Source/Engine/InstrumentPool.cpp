@@ -1,5 +1,6 @@
 #include "Engine/InstrumentPool.h"
 
+#include "Engine/BuiltInDrums.h"
 #include "Engine/BuiltInSynth.h"
 #include "Engine/PluginInstrument.h"
 #include "Engine/SfzInstrument.h"
@@ -62,6 +63,8 @@ std::unique_ptr<Instrument> InstrumentPool::createSyncNoLoan (const InstrumentKe
     switch (key.type)
     {
         case InstrumentKey::Type::builtIn:
+            if (key.ref.getIntValue() == BuiltInDrums::presetIndex)
+                return std::make_unique<BuiltInDrums>();
             return std::make_unique<BuiltInSynth> (key.ref.getIntValue());
 
         case InstrumentKey::Type::sfz:

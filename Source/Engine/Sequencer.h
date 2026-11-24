@@ -154,6 +154,11 @@ public:
     /** Panic: forget which notes are sounding. */
     void resetSounding() noexcept;
 
+    /** For the arpeggiator (audio thread, valid after generate()). */
+    bool isBlockRolling() const noexcept          { return blockRolling; }
+    double getBlockStartBeat() const noexcept     { return blockStartBeat; }
+    double getTempoBeatsPerSample() const noexcept { return tempoBps; }
+
 private:
     enum class Mode : int { stopped = 0, countIn, playing };
     enum Command : int { cmdPlay = 1, cmdStop = 2, cmdRecord = 4, cmdCountIn = 8, cmdStopRecording = 16 };
@@ -194,6 +199,7 @@ private:
 
     // Block mapping (audio thread), used by capture() and renderClicks()
     double blockStartBeat = 0.0, blockBeatsPerSample = 0.0;
+    double tempoBps = 120.0 / 60.0 / 48000.0;   ///< tempo in beats per sample, also when stopped
     int wrapAt = -1;                 ///< sample index where the loop wrapped in this block, -1 = none
     double wrapBeat = 0.0;           ///< beat at wrapAt
     bool blockRolling = false, blockCountIn = false;

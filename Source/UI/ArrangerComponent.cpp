@@ -1,6 +1,7 @@
 #include "UI/ArrangerComponent.h"
 
 #include "Core/AppPaths.h"
+#include "Model/Chords.h"
 #include "UI/KmLookAndFeel.h"
 
 namespace km
@@ -529,6 +530,128 @@ private:
 };
 
 //==============================================================================
+/** Chord track: chord symbols over time. Right-click or double-click to add/change, accompaniment from here. */
+class ArrangerComponent::ChordLane final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit ChordLane (ArrangerComponent& o) : owner (o)
+    {
+        setTooltip ("Akkoordspoor: dubbelklik of rechtsklik om akkoorden te zetten. Herkennen: rechtsklik op een clip.");
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto& s = owner.song.getSong();
+        g.fillAll (colours::background.brighter (0.05f));
+        g.setColour (colours::outline);
+        g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+
+        for (auto& c : s.chords)
+        {
+            const float x0 = (float) owner.beatToX (c.beat), x1 = (float) owner.beatToX (c.beat + c.length);
+            if (x1 < 0 || x0 > getWidth())
+                continue;
+            auto r = juce::Rectangle<float> (x0 + 1.0f, 3.0f, juce::jmax (4.0f, x1 - x0 - 2.0f), (float) getHeight() - 7.0f);
+            g.setColour (colours::learn.withAlpha (0.25f));
+            g.fillRoundedRectangle (r, 3.0f);
+            g.setColour (colours::learn);
+            g.drawRoundedRectangle (r, 3.0f, 1.0f);
+            g.setColour (colours::text);
+            g.drawText (chords::name (c), r.reduced (5.0f, 0.0f), juce::Justification::centredLeft, true);
+        }
+
+        if (s.chords.empty())
+        {
+            g.setColour (colours::textDim);
+            g.setFont (juce::FontOptions (12.0f));
+            g.drawText ("Akkoorden: dubbelklik op een maat, of rechtsklik op een clip > Akkoorden herkennen",
+                        getLocalBounds().reduced (8, 0), juce::Justification::centredLeft, true);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+            showMenu (e.x);
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& e) override { showMenu (e.x); }
+
+private:
+    const ChordEvent* chordAt (double beat) const
+    {
+        for (auto& c : owner.song.getSong().chords)
+            if (beat >= c.beat && beat < c.beat + c.length)
+                return &c;
+        return nullptr;
+    }
+
+    static juce::PopupMenu chordPicker()
+    {
+        juce::PopupMenu roots;
+        for (int r = 0; r < 12; ++r)
+        {
+            juce::PopupMenu typeMenu;
+            for (int t = 0; t < (int) chords::types().size(); ++t)
+                typeMenu.addItem (1000 + r * 20 + t, juce::String (chords::rootName (r)) + chords::types()[(size_t) t].suffix
+                                                         + (t == 0 ? " (majeur)" : t == 1 ? " (mineur)" : ""));
+            roots.addSubMenu (chords::rootName (r), typeMenu);
+        }
+        return roots;
+    }
+
+    void showMenu (int x)
+    {
+        const auto& s = owner.song.getSong();
+        const double bar = juce::jmax (0.25, s.beatsPerBarAsQuarters());
+        const double beat = juce::jmax (0.0, owner.xToBeat (x));
+        const auto* existing = chordAt (beat);
+        const double at = existing != nullptr ? existing->beat : std::floor (beat / bar) * bar;
+        const double length = existing != nullptr ? existing->length : bar;
+
+        juce::PopupMenu m;
+        m.addSubMenu (existing != nullptr ? "Akkoord wijzigen (" + chords::name (*existing) + ")"
+                                          : "Akkoord op maat " + juce::String ((int) (at / bar) + 1), chordPicker());
+        if (existing != nullptr)
+        {
+            m.addItem (2, "Twee maten lang", true, std::abs (existing->length - 2 * bar) < 1.0e-6);
+            m.addItem (3, "Een maat lang", true, std::abs (existing->length - bar) < 1.0e-6);
+            m.addItem (4, "Halve maat lang", true, std::abs (existing->length - bar / 2) < 1.0e-6);
+            m.addItem (5, "Akkoord verwijderen");
+        }
+        m.addSeparator();
+        const auto& tracks = s.tracks;
+        const bool midiTrack = juce::isPositiveAndBelow (owner.selectedTrack, (int) tracks.size()) && ! tracks[(size_t) owner.selectedTrack].isAudio();
+        const juce::String target = midiTrack ? " op '" + tracks[(size_t) owner.selectedTrack].name + "'" : juce::String (" (kies eerst een MIDI-spoor)");
+        m.addItem (10, "Begeleiding maken (akkoorden)" + target, midiTrack && ! s.chords.empty());
+        m.addItem (11, "Baslijn maken" + target, midiTrack && ! s.chords.empty());
+        m.addItem (12, "Akkoorden + bas maken" + target, midiTrack && ! s.chords.empty());
+
+        juce::Component::SafePointer<ChordLane> safe (this);
+        const int track = owner.selectedTrack;
+        const bool hadChord = existing != nullptr;
+        const int oldRoot = hadChord ? existing->root : 0, oldType = hadChord ? existing->type : 0;
+        m.showMenuAsync (juce::PopupMenu::Options(), [safe, at, length, bar, track, oldRoot, oldType] (int r)
+        {
+            if (safe == nullptr || r == 0)
+                return;
+            auto& song = safe->owner.song;
+            if (r >= 1000)              song.setChord (at, length, (r - 1000) / 20, (r - 1000) % 20);
+            else if (r == 2)            song.setChord (at, 2 * bar, oldRoot, oldType);
+            else if (r == 3)            song.setChord (at, bar, oldRoot, oldType);
+            else if (r == 4)            song.setChord (at, bar / 2, oldRoot, oldType);
+            else if (r == 5)            song.removeChord (at);
+            else if (r == 10)           song.makeAccompaniment (track, true, false);
+            else if (r == 11)           song.makeAccompaniment (track, false, true);
+            else if (r == 12)           song.makeAccompaniment (track, true, true);
+        });
+    }
+
+    ArrangerComponent& owner;
+};
+
+//==============================================================================
 class ArrangerComponent::Lanes final : public juce::Component
 {
 public:
@@ -827,6 +950,7 @@ public:
         }
         m.addItem (3, "Bewerken in pianorol (dubbelklik)");
         m.addItem (4, "Dupliceren");
+        m.addItem (5, "Akkoorden herkennen > akkoordspoor");
         m.addSubMenu ("Take kiezen", takeMenu);
         m.addSeparator();
         m.addItem (2, "Clip verwijderen");
@@ -838,6 +962,7 @@ public:
             if (r >= 100) safe->owner.song.useTake (t, r - 100);
             if (r == 3) safe->owner.openEditor (t, c);
             if (r == 4) safe->owner.selectedClip = safe->owner.song.duplicateClip (t, c);
+            if (r == 5) safe->owner.song.detectChords (t, c);
             if (r == 2) { safe->owner.song.deleteClip (t, c); safe->owner.selectedClip = -1; }
         });
     }
@@ -904,6 +1029,8 @@ ArrangerComponent::ArrangerComponent (AppController& c)
     ruler = std::make_unique<Ruler> (*this);
     tempoLane = std::make_unique<TempoLane> (*this);
     addAndMakeVisible (*tempoLane);
+    chordLane = std::make_unique<ChordLane> (*this);
+    addAndMakeVisible (*chordLane);
     lanes = std::make_unique<Lanes> (*this);
 
     addAndMakeVisible (*transport);
@@ -955,6 +1082,7 @@ void ArrangerComponent::refresh()
         selectedTrack = -1;
     transport->refresh();
     tempoLane->repaint();
+    chordLane->repaint();
     if (pianoRoll->isVisible())
         pianoRoll->reloadFromSong();
     updateScrollRange();
@@ -982,6 +1110,7 @@ void ArrangerComponent::scrollBarMoved (juce::ScrollBar*, double start)
 {
     scrollBeat = juce::jmax (0.0, start);
     tempoLane->repaint();
+    chordLane->repaint();
     ruler->repaint();
     lanes->repaint();
 }
@@ -1021,6 +1150,7 @@ void ArrangerComponent::resized()
     hScroll.setBounds (r.removeFromBottom (14).withTrimmedLeft (headerWidth));
     ruler->setBounds (r.removeFromTop (rulerHeight).withTrimmedLeft (headerWidth));
     tempoLane->setBounds (r.removeFromTop (tempoHeight).withTrimmedLeft (headerWidth));
+    chordLane->setBounds (r.removeFromTop (chordHeight).withTrimmedLeft (headerWidth));
     bodyViewport.setBounds (r);
 
     const int lanesHeight = juce::jmax (r.getHeight(), (int) song.getSong().tracks.size() * laneHeight);
@@ -1036,10 +1166,11 @@ void ArrangerComponent::paint (juce::Graphics& g)
 {
     g.fillAll (colours::background);
     g.setColour (colours::panel);
-    g.fillRect (0, 54, headerWidth, rulerHeight + tempoHeight);
+    g.fillRect (0, 54, headerWidth, rulerHeight + tempoHeight + chordHeight);
     g.setColour (colours::textDim);
     g.setFont (juce::FontOptions (12.0f));
     g.drawText ("Tempo (BPM)", 10, 54 + rulerHeight, headerWidth - 20, tempoHeight, juce::Justification::centredLeft);
+    g.drawText ("Akkoorden", 10, 54 + rulerHeight + tempoHeight, headerWidth - 20, chordHeight, juce::Justification::centredLeft);
 }
 
 bool ArrangerComponent::keyPressed (const juce::KeyPress& key)

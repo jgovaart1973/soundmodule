@@ -327,6 +327,12 @@ void AppController::applyPartRealtime (int i)
     p.delaySend = c.delaySend;
     p.mute = c.mute;
     p.solo = c.solo;
+    p.arpOn = c.arpOn;
+    p.arpMode = c.arpMode;
+    p.arpRate = c.arpRate;
+    p.arpOctaves = c.arpOctaves;
+    p.arpGate = c.arpGate;
+    p.arpLatch = c.arpLatch;
 }
 
 void AppController::captureRealtimeIntoModel()
@@ -341,6 +347,12 @@ void AppController::captureRealtimeIntoModel()
         c.delaySend = p.delaySend;
         c.mute = p.mute;
         c.solo = p.solo;
+        c.arpOn = p.arpOn;
+        c.arpMode = p.arpMode;
+        c.arpRate = p.arpRate;
+        c.arpOctaves = p.arpOctaves;
+        c.arpGate = p.arpGate;
+        c.arpLatch = p.arpLatch;
 
         // Plug-in sound settings live inside the plug-in: capture them.
         if (auto* inst = assigned[(size_t) i]; inst != nullptr && inst->key.type == InstrumentKey::Type::plugin)
@@ -555,6 +567,8 @@ void AppController::handleProgramRequest (const ProgramRequest& req)
     auto* inst = assigned[(size_t) part];
     if (inst != nullptr && inst->key.type != InstrumentKey::Type::builtIn)
         return; // plug-ins / SFZ handle Program Change themselves
+    if (inst != nullptr && inst->key.ref.getIntValue() == 8)
+        return; // the built-in drum kit has one kit; Program Change is ignored like on most GM drum channels
 
     const int preset = gmMode ? ProgramMap::gmFamilyToBuiltInPreset (req.program)
                               : req.program % BuiltInSynth::getNumPresets();

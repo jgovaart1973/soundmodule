@@ -54,8 +54,21 @@ private:
     // Geometry
     float beatToX (double beat) const noexcept { return gridArea.getX() + (float) ((beat - scrollBeat) * pixelsPerBeat); }
     double xToBeat (float x) const noexcept    { return (x - gridArea.getX()) / pixelsPerBeat + scrollBeat; }
-    float noteToY (int note) const noexcept    { return gridArea.getY() + (float) (topNote - note) * noteHeight; }
-    int yToNote (float y) const noexcept       { return juce::jlimit (0, 127, topNote - (int) std::floor ((y - gridArea.getY()) / noteHeight)); }
+    float noteToY (int note) const noexcept;
+    int yToNote (float y) const noexcept;
+    int kbWidth() const noexcept               { return drumMode ? 112 : 56; }
+    float rowHeight() const noexcept           { return drumMode ? drumRowHeight : noteHeight; }
+
+    // Drum mode: one row per drum sound (General MIDI map) instead of a chromatic keyboard
+    void setDrumMode (bool on);
+    void rebuildDrumRows();
+    int rowOf (int note) const noexcept;
+    int rowAt (float y) const noexcept;
+    bool drumMode = false;
+    std::vector<int> rowNotes;
+    int firstRow = 0;
+    float drumRowHeight = 18.0f;
+    int toggleCandidate = -1;
     juce::Rectangle<float> noteRect (const SongNote& n) const;
     int hitNote (juce::Point<float> p) const;
     double snapBeat (double beat) const;
@@ -87,6 +100,7 @@ private:
     juce::ToggleButton snapButton { "Raster" }, lengthsButton { "Ook lengtes" };
     juce::Slider strength, swing;
     juce::Label strengthLabel, swingLabel;
+    juce::TextButton drumsButton { "Drums" };
     juce::TextButton quantizeButton { "Quantize (Q)" }, octDown { "-12" }, semiDown { "-1" }, semiUp { "+1" },
                      octUp { "+12" }, closeButton { "Sluiten" };
     juce::ScrollBar hScroll { false }, vScroll { true };

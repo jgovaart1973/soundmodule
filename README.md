@@ -2,8 +2,8 @@
 
 Een Windows x64-programma dat je pc verandert in een hoogwaardige **klankmodule voor MIDI-apparaten**.
 Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule), **fase 2a**
-(opnemen en arrangeren), **fase 2b** (pianorol, ongedaan maken) en **fase 3a** (audiosporen en
-tempowisselingen).
+(opnemen en arrangeren), **fase 2b** (pianorol, ongedaan maken), **fase 3a** (audiosporen en
+tempowisselingen) en **fase 3b** (drumstel en drum-editor, arpeggiator, akkoordspoor).
 
 ## Wat het nu kan (fase 1)
 
@@ -88,6 +88,33 @@ Onder de liniaal staat het **tempospoor**.
 Een geïmporteerd MIDI-bestand krijgt per kanaal een spoor op de part met hetzelfde nummer.
 Parts zonder klank krijgen automatisch een passende ingebouwde klank.
 
+## Drums (fase 3b)
+- Nieuwe ingebouwde klank **Drumstel (GM)**: alle General MIDI-drumnoten (35-81) zijn gesynthetiseerd:
+  kick, snare, rim, clap, hihats (een dichte hihat kapt de open af), toms, crash, ride, bell, percussie.
+- In de pianorol zet de knop **Drums** de **drum-editor** aan: per rij een instrument met naam
+  (Kick, Snare, Closed hat ...). Klik = slag zetten, klik op een slag = weghalen, Alt+klik = zachte slag.
+  Een spoor met het drumstel (of MIDI-kanaal 10) opent automatisch in drum-modus.
+- Een MIDI-bestand met kanaal 10 krijgt bij importeren automatisch een drumspoor met het drumstel.
+- Programmawissels op een part met het drumstel worden genegeerd (het drumstel blijft staan).
+
+## Arpeggiator (fase 3b)
+Elke part heeft een knop **Arp**. Daar kies je:
+- **Modus**: op, neer, op-neer, willekeurig, zoals gespeeld, akkoord (herhaald).
+- **Snelheid** 1/4, 1/8, 1/8 triool, 1/16, 1/16 triool, 1/32 - loopt synchroon met het tempo als het
+  nummer speelt, anders op het eigen tempo.
+- **Octaven** (1-4), **gate** (nootlengte) en **latch** (blijft doorlopen na loslaten; een nieuw akkoord vervangt het).
+- Opnemen legt de noten vast die de arpeggiator speelt. Instellingen worden in de performance bewaard.
+
+## Akkoordspoor (fase 3b)
+Onder het tempospoor staat het **akkoordspoor**.
+- Dubbelklik of rechtsklik op een maat om een akkoord te kiezen (12 grondtonen x 14 soorten:
+  majeur, mineur, 7, maj7, m7, dim, aug, sus2, sus4, 6, m6, add9, m7b5, dim7). Rechtsklik op een akkoord
+  om de lengte te veranderen of het te verwijderen.
+- Rechtsklik op een MIDI-clip > **Akkoorden herkennen**: KlankModule bepaalt per maat het akkoord
+  (de basnoot telt mee) en zet ze op het akkoordspoor.
+- **Begeleiding maken** / **Baslijn maken** (rechtsklik op het akkoordspoor) zet een nieuwe clip met
+  akkoorden en/of grondtonen op het gekozen MIDI-spoor - handig als startpunt, daarna vrij te bewerken.
+
 ## Bouwen op Windows
 
 **Eenmalig installeren**
@@ -169,13 +196,13 @@ Zonder `--midi` speelt het een korte demo. Handig om klanken te vergelijken of f
 
 ## Bekende beperkingen fase 1
 - Ingebouwde klanken zijn synthesizers; voor een echte piano gebruik je een SFZ-bibliotheek of een VST3.
-- General MIDI-modus kiest per GM-familie een ingebouwde klank; er is nog geen GM-drumkit.
+- General MIDI-modus kiest per GM-familie een ingebouwde klank; kanaal 10 gebruikt het ingebouwde drumstel.
 - MIDI loopt via de standaard Windows-MIDI-API. Op Windows 11 gaat dat automatisch via Windows MIDI
   Services (meerdere apps tegelijk op één keyboard). Echte MIDI 2.0-functies volgen in fase 3.
 - MIDI-uitgang naar hardware-synths, SysEx en MIDI-clock volgen in fase 3.
 - Audioclips inkorten (trimmen) en tijdrekken volgen later. Geleidelijke tempoveranderingen (accelerando) ook.
-- Nog te doen in fase 3: drum-editor, arpeggiator en akkoordspoor (3b), notenbalk en MIDI-uitgang naar hardware (3c),
-  MIDI 2.0 en CLAP-plug-ins (3d).
+- Akkoordherkenning werkt per maat; twee akkoorden binnen een maat worden nog niet apart herkend.
+- Nog te doen in fase 3: notenbalk en MIDI-uitgang naar hardware (3c), MIDI 2.0 en CLAP-plug-ins (3d).
 - Niet-opgeslagen wijzigingen van een performance vervallen als je naar een andere performance wisselt
   (wel bewaard bij afsluiten via de autosave). Sla op voor je wisselt.
 

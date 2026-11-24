@@ -64,6 +64,7 @@ add_library(km_core STATIC)
 target_sources(km_core PRIVATE
     Source/Core/AppPaths.cpp
     Source/Engine/BuiltInSynth.cpp
+    Source/Engine/BuiltInDrums.cpp
     Source/Engine/SfzInstrument.cpp
     Source/Engine/PluginInstrument.cpp
     Source/Engine/InstrumentPool.cpp
@@ -202,7 +203,8 @@ if(KM_BUILD_TESTS)
         Tests/TestAppController.cpp
         Tests/TestSequencer.cpp
         Tests/TestPluginHosting.cpp
-        Tests/TestEditing.cpp)
+        Tests/TestEditing.cpp
+        Tests/TestPhase3b.cpp)
     target_link_libraries(km_tests PRIVATE km_core Catch2::Catch2WithMain)
     add_dependencies(km_tests KmTestSynth_VST3)
     target_compile_definitions(km_tests PRIVATE

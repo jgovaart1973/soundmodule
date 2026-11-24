@@ -76,6 +76,10 @@ void Part::beginBlock() noexcept
             if (o == ownerCurrent)
                 o = (current != nullptr) ? ownerTail : none;
 
+    // Arpeggiated notes that are sounding belong to the outgoing sound: end them there.
+    if (current != nullptr && arp.isSounding())
+        arp.releaseNow (0, [this] (const uint8_t* d, int size, int pos) { tailMidi.addEvent (d, size, pos); });
+
     tail = current;
     tailSilentSamples = 0;
     current = incoming;
@@ -155,6 +159,12 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
     if (e.isNoteOff())
     {
         const int note = e.data[1] & 0x7f;
+        if (! direct && arpOut[ch][note] != 0)
+        {
+            arp.noteOff (arpOut[ch][note] - 1, params.arpLatch.load());
+            arpOut[ch][note] = 0;
+            return;
+        }
         const auto o = owner[ch][note];
         if (o == none)
             return;
@@ -217,6 +227,15 @@ void Part::handleEvent (const MidiEvent& e, int pos) noexcept
 
         if (current == nullptr)
             return;
+
+        // Arpeggiator on: the key joins the pattern instead of sounding directly.
+        if (! direct && params.arpOn.load())
+        {
+            arp.noteOn (outNote, outVel, ch + 1, params.arpLatch.load());
+            arpOut[ch][note] = (uint8_t) (outNote + 1);
+            activity.fetch_add (1, std::memory_order_relaxed);
+            return;
+        }
 
         const uint8_t on[3] = { (uint8_t) (0x90 | ch), (uint8_t) outNote, (uint8_t) outVel };
         sendToCurrent (on, 3, pos);
@@ -284,6 +303,32 @@ void Part::render (juce::AudioBuffer<float>& mainBus,
         tailMidi.clear();
         return;
     }
+
+    // Arpeggiator: turn held keys into a pattern for this block.
+    const bool arpOn = params.arpOn.load();
+    auto toCurrent = [this] (const uint8_t* d, int size, int pos)
+    {
+        sendToCurrent (d, size, pos);
+        record (d, size, pos);   // a recording keeps what the arpeggiator played
+    };
+    if (arpOn)
+    {
+        Arpeggiator::Settings s;
+        s.mode = (Arpeggiator::Mode) juce::jlimit (0, 5, params.arpMode.load());
+        s.stepBeats = Arpeggiator::rates()[(size_t) juce::jlimit (0, 5, params.arpRate.load())].beats;
+        s.octaves = params.arpOctaves.load();
+        s.gate = params.arpGate.load();
+        s.latch = params.arpLatch.load();
+        const bool synced = recorder != nullptr && recorder->isBlockRolling();
+        const double bps = recorder != nullptr ? recorder->getTempoBeatsPerSample() : 120.0 / 60.0 / 48000.0;
+        arp.process (s, synced, synced ? recorder->getBlockStartBeat() : 0.0, bps, n, toCurrent);
+    }
+    else if (arpWasOn)
+    {
+        arp.stopAll (0, toCurrent);
+        std::memset (arpOut, 0, sizeof (arpOut));
+    }
+    arpWasOn = arpOn;
 
     juce::AudioBuffer<float> out (scratch.getArrayOfWritePointers(), 2, n);
     out.clear();
@@ -368,6 +413,8 @@ void Part::panic() noexcept
     }
 
     std::memset (owner, 0, sizeof (owner));
+    std::memset (arpOut, 0, sizeof (arpOut));
+    arp.stopAll (0, [] (const uint8_t*, int, int) {});
     for (auto& s : sustainDown)
         s = false;
     currentMidi.clear();

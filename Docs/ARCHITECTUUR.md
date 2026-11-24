@@ -84,3 +84,17 @@ De audio-thread wacht nooit en alloceert niets:
   opnames naar een `AudioFormatWriter::ThreadedWriter` (lock-free buffer, schijf-thread schrijft weg).
 - Bij het afronden wordt de clip verschoven met de in+uit-latentie van de geluidskaart.
 - Export speelt het hele nummer via een eigen engine + sequencer (`OfflineRenderer::renderSong`).
+
+## Drums, arpeggiator en akkoorden (fase 3b)
+- `BuiltInDrums` is een `Instrument` (ingebouwde klank nummer 8) met gesynthetiseerde stemmen per GM-noot;
+  geen samples, geen allocatie in `process`. `DrumMap.h` geeft de rijnamen voor de drum-editor.
+- `Arpeggiator` (header-only, geen allocatie) zit in elke `Part`. Binnenkomende noten gaan naar de
+  arpeggiator; die maakt in `render` de noten voor het blok, gesynchroniseerd op de beat van de sequencer
+  (`isBlockRolling`, `getBlockStartBeat`, `getTempoBeatsPerSample`) of vrij lopend. De gespeelde noten
+  gaan naar het instrument en naar de opname-capture. Bij een klankwissel worden klinkende arp-noten in
+  de staart-MIDI van het oude instrument losgelaten.
+- Instellingen staan als atomics in `PartParams` en in `PartConfig` (JSON-object `arpeggiator`).
+- `Chords.h` (pure functies): akkoordsoorten, namen, herkenning via een gewogen toonklassenprofiel
+  (lengte x velocity, basnoot extra), per maat samengevoegd, voicing rond C4 en begeleiding.
+- `Song.chords` (JSON `chords`: [beat, lengte, grondtoon, soort]) en `Track.drums`; alle wijzigingen via
+  `SongController` en dus ongedaan te maken.

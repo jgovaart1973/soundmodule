@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/SpscQueue.h"
+#include "Engine/Arpeggiator.h"
 #include "Engine/Instrument.h"
 #include "Engine/PartFilter.h"
 #include "Midi/MidiEvent.h"
@@ -28,6 +29,14 @@ struct PartParams
     std::atomic<float> delaySend { 0.0f };
     std::atomic<bool>  mute { false };
     std::atomic<bool>  solo { false };
+
+    // Arpeggiator
+    std::atomic<bool>  arpOn { false };
+    std::atomic<int>   arpMode { 0 };
+    std::atomic<int>   arpRate { 1 };      ///< index into Arpeggiator::rates()
+    std::atomic<int>   arpOctaves { 1 };
+    std::atomic<float> arpGate { 0.6f };
+    std::atomic<bool>  arpLatch { false };
 };
 
 /** A Program Change that needs a decision on the message thread. */
@@ -98,6 +107,10 @@ private:
     void record (const uint8_t* data, int size, int pos) noexcept;
 
     Sequencer* recorder = nullptr;
+
+    Arpeggiator arp;
+    bool arpWasOn = false;
+    uint8_t arpOut[16][128] {};   ///< note sent to the arpeggiator for each key (after transpose), 0 = none
 
     const int index;
     ReleaseQueue& releaseQueue;

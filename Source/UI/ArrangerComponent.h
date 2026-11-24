@@ -33,6 +33,7 @@ private:
     class Ruler;
     class Lanes;
     class TempoLane;
+    class ChordLane;
 
     void timerCallback() override;
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
@@ -54,6 +55,7 @@ private:
     std::unique_ptr<Ruler> ruler;
     std::unique_ptr<Lanes> lanes;
     std::unique_ptr<TempoLane> tempoLane;
+    std::unique_ptr<ChordLane> chordLane;
     juce::Viewport bodyViewport;
     juce::Component body;
     juce::OwnedArray<TrackHeader> headers;
@@ -71,6 +73,7 @@ private:
     static constexpr int laneHeight = 64;
     static constexpr int rulerHeight = 26;
     static constexpr int tempoHeight = 30;
+    static constexpr int chordHeight = 26;
 };
 
 } // namespace km

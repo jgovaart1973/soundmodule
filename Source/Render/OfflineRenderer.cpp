@@ -50,6 +50,12 @@ bool OfflineRenderer::loadPerformance (const Performance& p, juce::String& error
         params.delaySend = c.delaySend;
         params.mute = c.mute;
         params.solo = c.solo;
+        params.arpOn = c.arpOn;
+        params.arpMode = c.arpMode;
+        params.arpRate = c.arpRate;
+        params.arpOctaves = c.arpOctaves;
+        params.arpGate = c.arpGate;
+        params.arpLatch = c.arpLatch;
 
         if (! c.enabled || c.instrument.isEmpty())
             continue;

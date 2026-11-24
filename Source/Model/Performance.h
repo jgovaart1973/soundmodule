@@ -71,6 +71,14 @@ struct PartConfig
     bool mute = false;
     bool solo = false;
 
+    // Arpeggiator
+    bool arpOn = false;
+    int arpMode = 0;       ///< Arpeggiator::Mode
+    int arpRate = 1;       ///< index into Arpeggiator::rates() (1 = 1/8)
+    int arpOctaves = 1;
+    float arpGate = 0.6f;
+    bool arpLatch = false;
+
     juce::var toVar() const;
     static PartConfig fromVar (const juce::var&);
 };

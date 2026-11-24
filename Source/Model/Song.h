@@ -59,6 +59,7 @@ struct Track
     Kind kind = Kind::midi;
     int part = 0;          ///< MIDI tracks: 0..15, which part (sound) plays this track
     bool mute = false, solo = false, armed = false;
+    bool drums = false;     ///< MIDI tracks: edit as a drum grid (General MIDI drum map)
     std::vector<Clip> clips;
 
     // Audio tracks
@@ -69,6 +70,15 @@ struct Track
     bool monitor = false;   ///< hear the input while armed
 
     bool isAudio() const noexcept { return kind == Kind::audio; }
+};
+
+/** A chord on the chord track. */
+struct ChordEvent
+{
+    double beat = 0.0;
+    double length = 4.0;
+    int root = 0;   ///< pitch class 0 = C .. 11 = B
+    int type = 0;   ///< index into chords::types()
 };
 
 /** Tempo from this beat on (step change). */
@@ -91,6 +101,7 @@ struct Song
     double loopStart = 0.0, loopEnd = 16.0;
     std::vector<Track> tracks;
     std::vector<TempoChange> tempoChanges;   ///< sorted by beat, all > 0; 'bpm' is the tempo at the start
+    std::vector<ChordEvent> chords;          ///< chord track, sorted by beat
     Performance performance;
 
     double beatsPerBarAsQuarters() const noexcept { return beatsPerBar * 4.0 / beatUnit; }

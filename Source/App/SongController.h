@@ -52,6 +52,7 @@ public:
     void setTrackMute (int track, bool);
     void setTrackSolo (int track, bool);
     void setTrackArmed (int track, bool);
+    void setTrackDrums (int track, bool);
     void deleteClip (int track, int clip);
     void moveClip (int track, int clip, double newStart);
     void useTake (int track, int clip);   ///< unmute this take, mute overlapping ones
@@ -78,6 +79,15 @@ public:
     bool importAudio (const juce::File& file, int track, double startBeat, juce::String& error);
     AudioCache& getAudioCache() noexcept { return audioCache; }
     bool isRecordingAudio() const noexcept { return ! audioRecordings.empty(); }
+
+    //== chord track ===========================================================
+    /** Put a chord at a beat (replaces a chord that starts there). */
+    void setChord (double beat, double length, int root, int type);
+    void removeChord (double beat);
+    /** Recognise the chords played in a clip and put them on the chord track. @returns how many. */
+    int detectChords (int track, int clip);
+    /** Write the chord track as a new clip on a MIDI track (block chords, and/or a bass line). @returns clip index. */
+    int makeAccompaniment (int track, bool chordsToo, bool bass);
 
     //== tempo map =============================================================
     /** Set the tempo from a beat on (beat <= 0: the start tempo). */

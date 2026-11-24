@@ -2,7 +2,9 @@
 
 #include "App/AppController.h"
 #include "Core/AppPaths.h"
+#include "Engine/BuiltInDrums.h"
 #include "Engine/BuiltInSynth.h"
+#include "Model/Chords.h"
 #include "Model/ProgramMap.h"
 #include "Render/OfflineRenderer.h"
 
@@ -210,6 +212,15 @@ void SongController::setTrackArmed (int track, bool on)
     if (juce::isPositiveAndBelow (track, (int) song.tracks.size()) && ! takesOpen)
     {
         song.tracks[(size_t) track].armed = on;
+        changed (false);
+    }
+}
+
+void SongController::setTrackDrums (int track, bool on)
+{
+    if (juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+    {
+        song.tracks[(size_t) track].drums = on;
         changed (false);
     }
 }
@@ -757,8 +768,18 @@ int SongController::importMidi (const juce::File& file, juce::String& error)
     for (size_t t = before; t < song.tracks.size(); ++t)
     {
         const int part = song.tracks[t].part;
+        const bool drumChannel = part == 9; // MIDI channel 10 is the drum channel in General MIDI
+        song.tracks[t].drums = drumChannel;
         if (! app.getPerformance().parts[(size_t) part].instrument.isEmpty())
             continue;
+
+        if (drumChannel)
+        {
+            app.setPartInstrument (part, InstrumentKey::builtIn (BuiltInDrums::presetIndex, "Drumstel (GM)"));
+            app.setPartEnabled (part, true);
+            song.tracks[t].name = song.tracks[t].name + " (Drumstel)";
+            continue;
+        }
 
         int program = 0;
         for (auto& c : song.tracks[t].clips)
@@ -799,6 +820,84 @@ bool SongController::exportAudio (const juce::File& file, juce::String& error)
     }
     setStatus (juce::String::fromUTF8 ("Geëxporteerd: ") + file.getFileName() + (loadError.isNotEmpty() ? " (let op: " + loadError.trim() + ")" : juce::String()));
     return true;
+}
+
+//==============================================================================
+void SongController::setChord (double beat, double length, int root, int type)
+{
+    pushUndo ("Akkoord");
+    auto& c = song.chords;
+    c.erase (std::remove_if (c.begin(), c.end(), [beat] (const ChordEvent& e) { return std::abs (e.beat - beat) < 1.0e-6; }), c.end());
+    c.push_back ({ juce::jmax (0.0, beat), juce::jmax (0.25, length), (root % 12 + 12) % 12, juce::jlimit (0, 13, type) });
+    std::sort (c.begin(), c.end(), [] (const ChordEvent& a, const ChordEvent& b) { return a.beat < b.beat; });
+    changed();
+}
+
+void SongController::removeChord (double beat)
+{
+    pushUndo ("Akkoord verwijderen");
+    auto& c = song.chords;
+    c.erase (std::remove_if (c.begin(), c.end(), [beat] (const ChordEvent& e) { return std::abs (e.beat - beat) < 1.0e-6; }), c.end());
+    changed();
+}
+
+int SongController::detectChords (int track, int clip)
+{
+    const auto* c = getClip (track, clip);
+    if (c == nullptr)
+        return 0;
+
+    auto found = chords::detectInClip (*c, barLength (song));
+    if (found.empty())
+    {
+        setStatus ("Geen akkoorden gevonden in deze clip.");
+        return 0;
+    }
+
+    pushUndo ("Akkoorden herkennen");
+    auto& list = song.chords;
+    // Replace what the chord track had in this range.
+    list.erase (std::remove_if (list.begin(), list.end(), [c] (const ChordEvent& e)
+                                { return e.beat >= c->start - 1.0e-6 && e.beat < c->end() - 1.0e-6; }),
+                list.end());
+    list.insert (list.end(), found.begin(), found.end());
+    std::sort (list.begin(), list.end(), [] (const ChordEvent& a, const ChordEvent& b) { return a.beat < b.beat; });
+    changed();
+
+    juce::StringArray names;
+    for (auto& f : found)
+        names.add (chords::name (f));
+    setStatus ("Akkoorden: " + names.joinIntoString ("  "));
+    return (int) found.size();
+}
+
+int SongController::makeAccompaniment (int track, bool chordsToo, bool bass)
+{
+    if (song.chords.empty())
+    {
+        setStatus ("Het akkoordspoor is leeg: herken eerst akkoorden of voeg ze toe.");
+        return -1;
+    }
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()) || song.tracks[(size_t) track].isAudio())
+    {
+        setStatus ("Kies eerst een MIDI-spoor voor de begeleiding.");
+        return -1;
+    }
+
+    pushUndo (bass && ! chordsToo ? "Baslijn maken" : "Begeleiding maken");
+    const double start = floorToBar (song, song.chords.front().beat);
+    const double end = song.chords.back().beat + song.chords.back().length;
+
+    Clip clip;
+    clip.name = bass && ! chordsToo ? "Baslijn" : "Begeleiding";
+    clip.start = start;
+    clip.length = juce::jmax (barLength (song), ceilToBar (song, end) - start);
+    clip.notes = chords::accompaniment (song.chords, start, bass, chordsToo);
+
+    auto& clips = song.tracks[(size_t) track].clips;
+    clips.push_back (clip);
+    changed();
+    return (int) clips.size() - 1;
 }
 
 //==============================================================================

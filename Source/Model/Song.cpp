@@ -121,6 +121,11 @@ juce::String Song::toJson() const
         tempoList.add (juce::Array<juce::var> { tc.beat, tc.bpm });
     root->setProperty ("tempoChanges", tempoList);
 
+    juce::Array<juce::var> chordList;
+    for (auto& c : chords)
+        chordList.add (juce::Array<juce::var> { c.beat, c.length, c.root, c.type });
+    root->setProperty ("chords", chordList);
+
     juce::var perf;
     juce::JSON::parse (performance.toJson(), perf);
     root->setProperty ("performance", perf);
@@ -156,6 +161,8 @@ juce::String Song::toJson() const
         }
         to->setProperty ("mute", t.mute);
         to->setProperty ("solo", t.solo);
+        if (t.drums)
+            to->setProperty ("drums", true);
 
         juce::Array<juce::var> clipList;
         for (auto& c : t.clips)
@@ -217,6 +224,12 @@ bool Song::fromJson (const juce::String& json, juce::String& error)
             if (tc.size() >= 2 && (double) tc[0] > 0.0)
                 s.setTempoAt ((double) tc[0], (double) tc[1]);
 
+    if (auto* chordArray = prop (root, "chords", {}).getArray())
+        for (auto& c : *chordArray)
+            if (c.size() >= 4)
+                s.chords.push_back ({ juce::jmax (0.0, (double) c[0]), juce::jmax (0.25, (double) c[1]),
+                                      juce::jlimit (0, 11, (int) c[2]), juce::jlimit (0, 13, (int) c[3]) });
+
     if (auto perf = prop (root, "performance", {}); perf.isObject())
     {
         juce::String perr;
@@ -233,6 +246,7 @@ bool Song::fromJson (const juce::String& json, juce::String& error)
             t.part = juce::jlimit (0, kNumParts - 1, (int) prop (tv, "part", 1) - 1);
             t.mute = (bool) prop (tv, "mute", false);
             t.solo = (bool) prop (tv, "solo", false);
+            t.drums = (bool) prop (tv, "drums", false);
             t.kind = prop (tv, "kind", "midi").toString() == "audio" ? Track::Kind::audio : Track::Kind::midi;
             t.volumeDb = juce::jlimit (-80.0f, 12.0f, (float) (double) prop (tv, "volumeDb", 0.0));
             t.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) prop (tv, "pan", 0.0));

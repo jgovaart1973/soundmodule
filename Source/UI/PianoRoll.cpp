@@ -1,5 +1,6 @@
 #include "UI/PianoRoll.h"
 
+#include "Model/DrumMap.h"
 #include "UI/KmLookAndFeel.h"
 
 namespace km
@@ -7,7 +8,6 @@ namespace km
 namespace
 {
     constexpr int toolbarHeight = 40;
-    constexpr int keyboardWidth = 56;
     constexpr int velocityHeight = 64;
     constexpr int ccHeight = 84;
     constexpr int scrollSize = 12;
@@ -39,6 +39,15 @@ PianoRoll::PianoRoll (AppController& a, SongController& s) : app (a), song (s)
     addAndMakeVisible (snapButton);
     snapButton.setToggleState (true, juce::dontSendNotification);
     snapButton.setTooltip ("Noten springen naar het raster (uit = vrij plaatsen)");
+
+    addAndMakeVisible (drumsButton);
+    drumsButton.setClickingTogglesState (true);
+    drumsButton.setTooltip ("Drum-editor: een rij per drumklank (General MIDI), klik = slag");
+    drumsButton.onClick = [this]
+    {
+        setDrumMode (drumsButton.getToggleState());
+        song.setTrackDrums (track, drumMode);
+    };
 
     addAndMakeVisible (quantizeButton);
     quantizeButton.setTooltip ("Gekozen noten (of alle) naar het raster trekken");
@@ -117,6 +126,10 @@ void PianoRoll::open (int t, int c)
     if (! isOpen())
         return;
 
+    const auto& tracks = song.getSong().tracks;
+    setDrumMode (juce::isPositiveAndBelow (track, (int) tracks.size()) && tracks[(size_t) track].drums);
+    drumsButton.setToggleState (drumMode, juce::dontSendNotification);
+
     // Centre the view on the notes (or around middle C when empty).
     scrollBeat = 0.0;
     if (! clip.notes.empty())
@@ -155,12 +168,64 @@ void PianoRoll::reloadFromSong()
     }
 
     clip = *c;
+    if (drumMode)
+        rebuildDrumRows();
     for (auto it = selection.begin(); it != selection.end();)
         it = *it >= (int) clip.notes.size() ? selection.erase (it) : std::next (it);
 
     const auto& tr = song.getSong().tracks[(size_t) track];
     title.setText (tr.name + "  -  " + (clip.name.isNotEmpty() ? clip.name : juce::String ("Clip")), juce::dontSendNotification);
     updateScrollBars();
+    repaint();
+}
+
+float PianoRoll::noteToY (int note) const noexcept
+{
+    if (drumMode)
+        return gridArea.getY() + (float) (rowOf (note) - firstRow) * drumRowHeight;
+    return gridArea.getY() + (float) (topNote - note) * noteHeight;
+}
+
+int PianoRoll::yToNote (float y) const noexcept
+{
+    if (drumMode)
+        return rowNotes.empty() ? 36 : rowNotes[(size_t) rowAt (y)];
+    return juce::jlimit (0, 127, topNote - (int) std::floor ((y - gridArea.getY()) / noteHeight));
+}
+
+int PianoRoll::rowOf (int note) const noexcept
+{
+    for (int i = 0; i < (int) rowNotes.size(); ++i)
+        if (rowNotes[(size_t) i] == note)
+            return i;
+    return 0;
+}
+
+int PianoRoll::rowAt (float y) const noexcept
+{
+    return juce::jlimit (0, juce::jmax (0, (int) rowNotes.size() - 1),
+                         firstRow + (int) std::floor ((y - gridArea.getY()) / drumRowHeight));
+}
+
+void PianoRoll::rebuildDrumRows()
+{
+    rowNotes.clear();
+    for (auto& r : gmDrumRows())
+        rowNotes.push_back (r.note);
+    // Notes in the clip that are not in the map get their own rows at the bottom.
+    for (auto& n : clip.notes)
+        if (std::find (rowNotes.begin(), rowNotes.end(), n.note) == rowNotes.end())
+            rowNotes.push_back (n.note);
+}
+
+void PianoRoll::setDrumMode (bool on)
+{
+    drumMode = on;
+    firstRow = 0;
+    rebuildDrumRows();
+    if (on && gridBox.getSelectedId() == 3 && clip.notes.empty())
+        gridBox.setSelectedId (3, juce::dontSendNotification); // 1/16 is the natural drum grid
+    resized();
     repaint();
 }
 
@@ -191,7 +256,7 @@ juce::Rectangle<float> PianoRoll::noteRect (const SongNote& n) const
 {
     const float x0 = beatToX (n.start);
     const float x1 = beatToX (n.start + n.length);
-    return { x0, noteToY (n.note) + 1.0f, juce::jmax (3.0f, x1 - x0), noteHeight - 2.0f };
+    return { x0, noteToY (n.note) + 1.0f, juce::jmax (drumMode ? 10.0f : 3.0f, x1 - x0), rowHeight() - 2.0f };
 }
 
 int PianoRoll::hitNote (juce::Point<float> p) const
@@ -258,7 +323,8 @@ void PianoRoll::resized()
     laneBox.setBounds (bar.removeFromRight (140));
     bar.removeFromRight (8);
 
-    place (title, 160);
+    place (title, 130);
+    place (drumsButton, 64);
     place (gridBox, 110);
     place (snapButton, 76);
     place (quantizeButton, 110);
@@ -272,17 +338,17 @@ void PianoRoll::resized()
     place (semiUp, 34);
     place (octUp, 40);
 
-    hScroll.setBounds (r.removeFromBottom (scrollSize).withTrimmedLeft (keyboardWidth).withTrimmedRight (scrollSize));
+    hScroll.setBounds (r.removeFromBottom (scrollSize).withTrimmedLeft (kbWidth()).withTrimmedRight (scrollSize));
     auto cc = r.removeFromBottom (ccHeight);
     auto vel = r.removeFromBottom (velocityHeight);
     vScroll.setBounds (r.removeFromRight (scrollSize));
     cc.removeFromRight (scrollSize);
     vel.removeFromRight (scrollSize);
 
-    keyboardArea = r.removeFromLeft (keyboardWidth).toFloat();
+    keyboardArea = r.removeFromLeft (kbWidth()).toFloat();
     gridArea = r.toFloat();
-    velocityArea = vel.withTrimmedLeft (keyboardWidth).toFloat();
-    ccArea = cc.withTrimmedLeft (keyboardWidth).toFloat();
+    velocityArea = vel.withTrimmedLeft (kbWidth()).toFloat();
+    ccArea = cc.withTrimmedLeft (kbWidth()).toFloat();
     updateScrollBars();
 }
 
@@ -292,6 +358,12 @@ void PianoRoll::updateScrollBars()
     hScroll.setRangeLimits (0.0, juce::jmax (clip.length + 4.0, scrollBeat + visibleBeats), juce::dontSendNotification);
     hScroll.setCurrentRange (scrollBeat, visibleBeats, juce::dontSendNotification);
 
+    if (drumMode)
+    {
+        vScroll.setRangeLimits (0.0, (double) juce::jmax (1, (int) rowNotes.size()), juce::dontSendNotification);
+        vScroll.setCurrentRange (firstRow, gridArea.getHeight() / drumRowHeight, juce::dontSendNotification);
+        return;
+    }
     const double visibleNotes = gridArea.getHeight() / noteHeight;
     vScroll.setRangeLimits (0.0, 128.0, juce::dontSendNotification);
     vScroll.setCurrentRange (127.0 - topNote, visibleNotes, juce::dontSendNotification);
@@ -301,6 +373,8 @@ void PianoRoll::scrollBarMoved (juce::ScrollBar* bar, double start)
 {
     if (bar == &hScroll)
         scrollBeat = juce::jmax (0.0, start);
+    else if (drumMode)
+        firstRow = juce::jlimit (0, juce::jmax (0, (int) rowNotes.size() - 1), (int) std::round (start));
     else
         topNote = juce::jlimit (0, 127, 127 - (int) std::round (start));
     repaint();
@@ -330,7 +404,26 @@ void PianoRoll::paint (juce::Graphics& g)
     {
         juce::Graphics::ScopedSaveState s (g);
         g.reduceClipRegion (keyboardArea.getUnion (gridArea).toNearestInt());
-        const int bottomNote = juce::jmax (0, topNote - (int) (gridArea.getHeight() / noteHeight) - 1);
+        if (drumMode)
+        {
+            for (int row = firstRow; row < (int) rowNotes.size(); ++row)
+            {
+                const float y = gridArea.getY() + (float) (row - firstRow) * drumRowHeight;
+                if (y > gridArea.getBottom())
+                    break;
+                const int note = rowNotes[(size_t) row];
+                g.setColour (row % 2 == 0 ? colours::background : colours::panelLight.darker (0.45f));
+                g.fillRect (gridArea.getX(), y, gridArea.getWidth(), drumRowHeight);
+                g.setColour (colours::panelLight);
+                g.fillRect (keyboardArea.getX(), y, keyboardArea.getWidth() - 1.0f, drumRowHeight - 1.0f);
+                g.setColour (colours::text);
+                g.setFont (juce::FontOptions (11.0f));
+                const char* name = gmDrumName (note);
+                g.drawText (name != nullptr ? juce::String (name) : noteName (note),
+                            keyboardArea.withY (y).withHeight (drumRowHeight).reduced (5, 0), juce::Justification::centredLeft);
+            }
+        }
+        const int bottomNote = drumMode ? topNote + 1 : juce::jmax (0, topNote - (int) (gridArea.getHeight() / noteHeight) - 1);
         for (int n = topNote; n >= bottomNote; --n)
         {
             const float y = noteToY (n);
@@ -414,7 +507,7 @@ void PianoRoll::paint (juce::Graphics& g)
     }
     g.setColour (colours::textDim);
     g.setFont (juce::FontOptions (11.0f));
-    g.drawFittedText ("Velocity", juce::Rectangle<float> (0.0f, velocityArea.getY(), (float) keyboardWidth, velocityArea.getHeight()).toNearestInt().reduced (3),
+    g.drawFittedText ("Velocity", juce::Rectangle<float> (0.0f, velocityArea.getY(), (float) kbWidth(), velocityArea.getHeight()).toNearestInt().reduced (3),
                       juce::Justification::centred, 2);
 
     // --- controller lane
@@ -454,7 +547,7 @@ void PianoRoll::paint (juce::Graphics& g)
     }
     g.setColour (colours::textDim);
     g.drawFittedText (juce::String (lane().name).upToFirstOccurrenceOf (" ", false, false),
-                      juce::Rectangle<float> (0.0f, ccArea.getY(), (float) keyboardWidth, ccArea.getHeight()).toNearestInt().reduced (3),
+                      juce::Rectangle<float> (0.0f, ccArea.getY(), (float) kbWidth(), ccArea.getHeight()).toNearestInt().reduced (3),
                       juce::Justification::centred, 2);
 }
 
@@ -508,7 +601,8 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
             }
 
             const auto& n = clip.notes[(size_t) hit];
-            drag = p.x > noteRect (n).getRight() - 6.0f ? Drag::resize : Drag::move;
+            drag = (! drumMode && p.x > noteRect (n).getRight() - 6.0f) ? Drag::resize : Drag::move;
+            toggleCandidate = drumMode && ! e.mods.isShiftDown() ? hit : -1;
             originals = clip.notes;
             dragAnchor = hit;
             dragStartBeat = xToBeat (p.x);
@@ -516,6 +610,22 @@ void PianoRoll::mouseDown (const juce::MouseEvent& e)
             lastVelocity = n.velocity;
             lastPreviewNote = n.note;
             app.previewNote (partOfTrack(), n.note, n.velocity, n.channel);
+        }
+        else if (drumMode && ! e.mods.isShiftDown())
+        {
+            // Drum grid: one click places a hit (Alt-click = soft, otherwise the last velocity).
+            SongNote n;
+            const double beat = juce::jmax (0.0, xToBeat (p.x));
+            n.start = snapButton.getToggleState() ? edit::floorToGrid (beat, grid()) : beat;
+            n.length = juce::jmax (0.05, grid() * 0.5);
+            n.note = yToNote (p.y);
+            n.velocity = e.mods.isAltDown() ? 60 : lastVelocity;
+            n.channel = 10;
+            clip.notes.push_back (n);
+            selection = { (int) clip.notes.size() - 1 };
+            app.previewNote (partOfTrack(), n.note, n.velocity, 10, 120);
+            commitNotes ("Slag toevoegen");
+            return;
         }
         else
         {
@@ -568,7 +678,8 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
             double dBeat = xToBeat (p.x) - dragStartBeat;
             if (snapButton.getToggleState())
                 dBeat = std::round (dBeat / grid()) * grid();
-            const int dNote = drag == Drag::move ? yToNote (p.y) - dragStartNote : 0;
+            const int dNote = drag == Drag::move && ! drumMode ? yToNote (p.y) - dragStartNote : 0;
+            const int dRow = drag == Drag::move && drumMode ? rowAt (p.y) - rowOf (dragStartNote) : 0;
 
             clip.notes = originals;
             for (int i : selection)
@@ -579,7 +690,10 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
                 if (drag == Drag::move)
                 {
                     n.start = juce::jmax (0.0, n.start + dBeat);
-                    n.note = juce::jlimit (0, 127, n.note + dNote);
+                    if (drumMode)
+                        n.note = rowNotes[(size_t) juce::jlimit (0, (int) rowNotes.size() - 1, rowOf (n.note) + dRow)];
+                    else
+                        n.note = juce::jlimit (0, 127, n.note + dNote);
                 }
                 else
                 {
@@ -587,7 +701,7 @@ void PianoRoll::mouseDrag (const juce::MouseEvent& e)
                     n.length = juce::jmax (minLen, n.length + dBeat);
                 }
             }
-            changedInGesture = std::abs (dBeat) > 1e-9 || dNote != 0;
+            changedInGesture = std::abs (dBeat) > 1e-9 || dNote != 0 || dRow != 0;
 
             // Hear the new pitch while dragging up/down.
             if (drag == Drag::move && juce::isPositiveAndBelow (dragAnchor, (int) clip.notes.size())
@@ -656,6 +770,17 @@ void PianoRoll::mouseUp (const juce::MouseEvent&)
     const auto finished = drag;
     drag = Drag::none;
 
+    // Drum grid: clicking a hit without dragging removes it (like a step sequencer).
+    if (drumMode && finished == Drag::move && ! changedInGesture && juce::isPositiveAndBelow (toggleCandidate, (int) clip.notes.size()))
+    {
+        clip.notes.erase (clip.notes.begin() + toggleCandidate);
+        selection.clear();
+        toggleCandidate = -1;
+        commitNotes ("Slag verwijderen");
+        return;
+    }
+    toggleCandidate = -1;
+
     if (changedInGesture)
     {
         switch (finished)
@@ -676,8 +801,8 @@ void PianoRoll::mouseUp (const juce::MouseEvent&)
 
 void PianoRoll::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (! isOpen() || ! gridArea.contains (e.position))
-        return;
+    if (! isOpen() || ! gridArea.contains (e.position) || drumMode)
+        return; // in the drum grid single clicks already add and remove hits
 
     const int hit = hitNote (e.position);
     if (hit >= 0)
@@ -713,6 +838,10 @@ void PianoRoll::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
     {
         const double d = (std::abs (w.deltaX) > 0 ? w.deltaX : w.deltaY) * -150.0 / pixelsPerBeat;
         scrollBeat = juce::jmax (0.0, scrollBeat + d);
+    }
+    else if (drumMode)
+    {
+        firstRow = juce::jlimit (0, juce::jmax (0, (int) rowNotes.size() - 1), firstRow + (w.deltaY > 0 ? -2 : 2));
     }
     else
     {

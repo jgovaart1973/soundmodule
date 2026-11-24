@@ -1,0 +1,245 @@
+#include "Engine/BuiltInDrums.h"
+
+namespace km
+{
+namespace
+{
+    constexpr float twoPi = juce::MathConstants<float>::twoPi;
+    // Inharmonic square-wave frequencies of the classic analogue hihat/cymbal circuit.
+    constexpr float metalFreqs[6] = { 205.3f, 304.4f, 369.6f, 522.7f, 540.0f, 800.0f };
+
+    float maxDuration (int kind)
+    {
+        switch (kind)
+        {
+            case 0: return 0.9f;   // kick
+            case 7: return 1.0f;   // tom
+            case 8: return 3.5f;   // crash
+            case 9: return 2.5f;   // ride
+            case 10: return 2.0f;  // bell
+            case 6: return 1.4f;   // open hat
+            default: return 0.6f;
+        }
+    }
+} // namespace
+
+BuiltInDrums::BuiltInDrums()
+{
+    key = InstrumentKey::builtIn (presetIndex, getName());
+}
+
+void BuiltInDrums::prepare (double sampleRate, int)
+{
+    sr = (float) sampleRate;
+    dt = 1.0f / sr;
+    allNotesOff();
+}
+
+void BuiltInDrums::allNotesOff() noexcept
+{
+    for (auto& v : voices)
+        v.active = false;
+}
+
+float BuiltInDrums::noise() noexcept
+{
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
+    return (float) (rng & 0xffffff) / (float) 0x7fffff - 1.0f;
+}
+
+void BuiltInDrums::trigger (int note, int velocity) noexcept
+{
+    Kind kind = Kind::blip;
+    float freq = 440.0f, pan = 0.0f;
+
+    switch (note)
+    {
+        case 35: case 36: kind = Kind::kick; break;
+        case 37:          kind = Kind::rim; pan = -0.1f; break;
+        case 38: case 40: kind = Kind::snare; pan = -0.05f; break;
+        case 39:          kind = Kind::clap; break;
+        case 42:          kind = Kind::hatClosed; pan = 0.3f; break;
+        case 44:          kind = Kind::hatPedal; pan = 0.3f; break;
+        case 46:          kind = Kind::hatOpen; pan = 0.3f; break;
+        case 41: kind = Kind::tom; freq = 62.0f;  pan = 0.45f; break;
+        case 43: kind = Kind::tom; freq = 78.0f;  pan = 0.35f; break;
+        case 45: kind = Kind::tom; freq = 98.0f;  pan = 0.15f; break;
+        case 47: kind = Kind::tom; freq = 120.0f; pan = 0.0f;  break;
+        case 48: kind = Kind::tom; freq = 145.0f; pan = -0.15f; break;
+        case 50: kind = Kind::tom; freq = 175.0f; pan = -0.3f; break;
+        case 49: case 52: case 55: case 57: kind = Kind::crash; pan = note == 57 ? 0.4f : -0.4f; break;
+        case 51: case 59: kind = Kind::ride; pan = 0.45f; break;
+        case 53:          kind = Kind::rideBell; pan = 0.45f; break;
+        case 54:          kind = Kind::tambourine; pan = 0.2f; break;
+        case 56:          kind = Kind::cowbell; pan = -0.2f; break;
+        case 69: case 70: case 82: kind = Kind::shaker; pan = 0.25f; break;
+        case 75: case 76: case 77: kind = Kind::clave; pan = -0.25f; break;
+        default: freq = (float) juce::MidiMessage::getMidiNoteInHertz (note); break;
+    }
+
+    // Closed / pedal hihat choke a ringing open hihat.
+    if (kind == Kind::hatClosed || kind == Kind::hatPedal)
+        for (auto& v : voices)
+            if (v.active && v.kind == Kind::hatOpen)
+                v.choking = true;
+
+    // Free voice, otherwise steal the oldest.
+    Voice* target = nullptr;
+    for (auto& v : voices)
+        if (! v.active) { target = &v; break; }
+    if (target == nullptr)
+    {
+        target = &voices[0];
+        for (auto& v : voices)
+            if (v.t > target->t) target = &v;
+    }
+
+    *target = Voice{};
+    target->active = true;
+    target->kind = kind;
+    target->note = note;
+    target->velocity = std::pow ((float) velocity / 127.0f, 1.3f);
+    target->freq = freq;
+    const float angle = (pan + 1.0f) * 0.25f * juce::MathConstants<float>::pi;
+    target->panL = std::cos (angle) * 1.41421356f;
+    target->panR = std::sin (angle) * 1.41421356f;
+}
+
+float BuiltInDrums::renderVoice (Voice& v) noexcept
+{
+    const float t = v.t;
+    auto hp = [&v] (float x, float coef)
+    {
+        const float y = coef * (v.hpState + x - v.hpPrev);
+        v.hpPrev = x;
+        v.hpState = y;
+        return y;
+    };
+    auto bandpass = [&v, this] (float x, float centre, float q)
+    {
+        const float f = 2.0f * std::sin (juce::MathConstants<float>::pi * juce::jmin (centre, sr * 0.2f) / sr);
+        v.bpLow += f * v.bpBand;
+        const float high = x - v.bpLow - q * v.bpBand;
+        v.bpBand += f * high;
+        return v.bpBand;
+    };
+    auto metal = [&v, this] (float scale)
+    {
+        float s = 0.0f;
+        for (int i = 0; i < 6; ++i)
+        {
+            v.metalPhase[i] += metalFreqs[i] * scale * dt;
+            if (v.metalPhase[i] >= 1.0f) v.metalPhase[i] -= 1.0f;
+            s += v.metalPhase[i] < 0.5f ? 1.0f : -1.0f;
+        }
+        return s / 6.0f;
+    };
+    auto env = [t] (float tau) { return std::exp (-t / tau); };
+
+    float s = 0.0f;
+    switch (v.kind)
+    {
+        case Kind::kick:
+        {
+            const float pitch = 45.0f + 110.0f * env (0.035f);
+            v.phase += pitch * dt;
+            s = std::sin (twoPi * v.phase) * env (0.32f) + 0.3f * noise() * env (0.004f);
+            break;
+        }
+        case Kind::snare:
+            s = 0.5f * std::sin (twoPi * 185.0f * t) * env (0.09f) + 0.3f * std::sin (twoPi * 330.0f * t) * env (0.06f)
+              + 0.8f * hp (noise(), 0.85f) * env (0.16f);
+            break;
+        case Kind::rim:
+            s = 0.6f * std::sin (twoPi * 1700.0f * t) * env (0.012f) + 0.5f * bandpass (noise(), 2500.0f, 0.4f) * env (0.02f);
+            break;
+        case Kind::clap:
+        {
+            // Three quick slaps and a short room tail.
+            float e = 0.0f;
+            for (float start : { 0.0f, 0.011f, 0.022f })
+                if (t >= start) e = juce::jmax (e, std::exp (-(t - start) / 0.006f));
+            if (t >= 0.03f) e = juce::jmax (e, 0.7f * std::exp (-(t - 0.03f) / 0.14f));
+            s = 1.6f * bandpass (noise(), 1100.0f, 0.5f) * e;
+            break;
+        }
+        case Kind::hatClosed:  s = 0.9f * hp (metal (1.0f) + 0.3f * noise(), 0.7f) * env (0.045f); break;
+        case Kind::hatPedal:   s = 0.7f * hp (metal (1.0f) + 0.3f * noise(), 0.7f) * env (0.09f); break;
+        case Kind::hatOpen:    s = 0.8f * hp (metal (1.0f) + 0.3f * noise(), 0.7f) * env (0.45f); break;
+        case Kind::tom:
+        {
+            const float pitch = v.freq * (1.0f + 0.6f * env (0.05f));
+            v.phase += pitch * dt;
+            s = 0.65f * std::sin (twoPi * v.phase) * env (0.28f) + 0.06f * noise() * env (0.01f);
+            break;
+        }
+        case Kind::crash:      s = 0.6f * hp (0.6f * metal (1.35f) + 0.6f * noise(), 0.75f) * env (1.3f); break;
+        case Kind::ride:       s = 0.4f * hp (metal (1.6f) + 0.2f * noise(), 0.8f) * env (0.9f); break;
+        case Kind::rideBell:   s = 0.35f * (std::sin (twoPi * 740.0f * t) + 0.6f * std::sin (twoPi * 1113.0f * t)) * env (0.7f)
+                                 + 0.25f * hp (metal (1.6f), 0.8f) * env (0.5f); break;
+        case Kind::tambourine: s = 0.6f * hp (metal (2.2f) * noise(), 0.6f) * env (0.22f); break;
+        case Kind::cowbell:
+        {
+            const float sq = (std::fmod (540.0f * t, 1.0f) < 0.5f ? 0.5f : -0.5f) + (std::fmod (800.0f * t, 1.0f) < 0.5f ? 0.5f : -0.5f);
+            s = 0.5f * bandpass (sq, 700.0f, 0.3f) * (0.6f * env (0.02f) + 0.4f * env (0.12f));
+            break;
+        }
+        case Kind::shaker:     s = 0.6f * hp (noise(), 0.5f) * juce::jmin (1.0f, t / 0.015f) * env (0.07f); break;
+        case Kind::clave:      s = 0.6f * std::sin (twoPi * 2500.0f * t) * env (0.025f); break;
+        case Kind::blip:       s = 0.4f * std::sin (twoPi * v.freq * t) * env (0.06f); break;
+    }
+
+    if (v.choking)
+    {
+        v.choke -= dt / 0.008f;   // 8 ms fade
+        if (v.choke <= 0.0f)
+            v.active = false;
+    }
+
+    v.t += dt;
+    if (v.t > maxDuration ((int) v.kind))
+        v.active = false;
+
+    return s * v.velocity * juce::jmax (0.0f, v.choke) * 0.55f;
+}
+
+void BuiltInDrums::process (juce::AudioBuffer<float>& out, juce::MidiBuffer& midi) noexcept
+{
+    auto* l = out.getWritePointer (0);
+    auto* r = out.getWritePointer (1);
+    const int n = out.getNumSamples();
+
+    auto renderRange = [&] (int from, int to)
+    {
+        for (auto& v : voices)
+        {
+            if (! v.active)
+                continue;
+            for (int i = from; i < to && v.active; ++i)
+            {
+                const float s = renderVoice (v);
+                l[i] += s * v.panL;
+                r[i] += s * v.panR;
+            }
+        }
+    };
+
+    int pos = 0;
+    for (const auto meta : midi)
+    {
+        const int at = juce::jlimit (0, n, meta.samplePosition);
+        renderRange (pos, at);
+        pos = at;
+        const auto* d = meta.data;
+        if (meta.numBytes >= 3 && (d[0] & 0xf0) == 0x90 && d[2] > 0)
+            trigger (d[1], d[2]);
+        else if (meta.numBytes >= 3 && (d[0] & 0xf0) == 0xb0 && (d[1] == 120 || d[1] == 123))
+            allNotesOff();
+        // Note-offs are ignored: drums are one-shots.
+    }
+    renderRange (pos, n);
+}
+
+} // namespace km

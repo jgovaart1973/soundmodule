@@ -52,6 +52,7 @@ public:
 
 private:
     void showInstrumentMenu();
+    void showArpPanel();
     void chooseSfzFile();
     void rebuildInputList();
     static juce::String noteName (int note);
@@ -63,7 +64,7 @@ private:
     juce::ToggleButton enableButton;
     juce::Label numberLabel;
     juce::ComboBox inputBox, channelBox, curveBox;
-    juce::TextButton instrumentButton, editorButton { "VST" }, muteButton { "M" }, soloButton { "S" };
+    juce::TextButton instrumentButton, editorButton { "VST" }, arpButton { "Arp" }, muteButton { "M" }, soloButton { "S" };
     LearnableSlider volume, pan, reverb, delay;
     juce::Slider transpose, keyLow, keyHigh, velLow, velHigh;
     LevelMeter meter;

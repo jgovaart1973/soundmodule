@@ -60,6 +60,10 @@ struct Track
     int part = 0;          ///< MIDI tracks: 0..15, which part (sound) plays this track
     bool mute = false, solo = false, armed = false;
     bool drums = false;     ///< MIDI tracks: edit as a drum grid (General MIDI drum map)
+    int transpose = 0;      ///< MIDI tracks: semitones added on playback (drum tracks are never transposed)
+
+    /** The note that sounds for a written note on this track. */
+    int playedNote (int note) const noexcept { return (drums || transpose == 0) ? note : juce::jlimit (0, 127, note + transpose); }
     std::vector<Clip> clips;
 
     // Audio tracks

@@ -532,7 +532,7 @@ juce::String BuiltInSynth::getPresetName (int index)
 BuiltInSynth::BuiltInSynth (int presetIndex)
 {
     setPreset (presetIndex);
-    for (int i = 0; i < 32; ++i)
+    for (int i = 0; i < 48; ++i)
         synth.addVoice (new KmVoice (preset, expression));
     synth.addSound (new KmSound());
     synth.setNoteStealingEnabled (true);

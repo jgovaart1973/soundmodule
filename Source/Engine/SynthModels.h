@@ -124,7 +124,10 @@ public:
             d2[i] = decayPerSample (tk * 1.7f, sr);
             e1[i] = 0.72f;
             e2[i] = 0.28f;
-            re[i] = 1.0f; im[i] = 0.0f;
+            // Spread the starting phases: partials that all start at phase 0 add up to a sawtooth-like
+            // step, which is heard as a click at every note.
+            const float ph = twoPi * (float) ((note * 131 + k * 977) % 1000) / 1000.0f;
+            re[i] = std::cos (ph); im[i] = std::sin (ph);
             total += amp[i];
             ++numPartials;
         }
@@ -136,9 +139,12 @@ public:
         for (int i = 0; i < numBeating; ++i)
         {
             detune[(size_t) i] = (0.45f + 0.12f * (float) (i + 1)) * 0.0005776f;
-            re2[(size_t) i] = 1.0f;
-            im2[(size_t) i] = 0.0f;
+            re2[(size_t) i] = re[(size_t) i];
+            im2[(size_t) i] = im[(size_t) i];
         }
+        // The hammer stays on the string for a few milliseconds (longer for soft notes): a smooth onset.
+        attackLength = juce::jmax (8, (int) ((0.0012f + 0.003f * (1.0f - vel)) * sr));
+        attackPos = 0;
 
         ratio = -1.0f;
         setRatio (1.0f);
@@ -239,6 +245,11 @@ public:
             out += hammer * hammerLp.low;
             hammer *= hammerDecay;
         }
+        if (attackPos < attackLength)
+        {
+            const float x = (float) attackPos++ / (float) attackLength;
+            out *= 0.5f - 0.5f * std::cos (pi * x);
+        }
         return out * loudness;
     }
 
@@ -248,7 +259,7 @@ private:
     static constexpr int maxPartials = 32, maxBeating = 8;
     alignas (16) std::array<float, maxPartials> freq {}, amp {}, d1 {}, d2 {}, e1 {}, e2 {}, env {}, re {}, im {}, cr {}, ci {};
     alignas (16) std::array<float, maxBeating> detune {}, re2 {}, im2 {}, cr2 {}, ci2 {};
-    int numPartials = 0, numBeating = 0, midiNote = 60, age = 0;
+    int numPartials = 0, numBeating = 0, midiNote = 60, age = 0, attackLength = 64, attackPos = 0;
     float sr = 48000.0f, vel = 1.0f, ratio = -1.0f, loudness = 1.0f, hammer = 0.0f, hammerDecay = 0.0f, currentLevel = 1.0f;
     bool released = false;
     Svf hammerLp;
@@ -367,7 +378,9 @@ public:
         toneLp.process (out);
         level = 0.999f * level + 0.001f * std::abs (toneLp.low);
         ++age;
-        return toneLp.low;
+        // ~0.7 ms fade-in: the pluck stays crisp but the first sample is no hard step.
+        const float fade = age < 32 ? (float) age / 32.0f : 1.0f;
+        return toneLp.low * fade;
     }
 
     bool isDone() const noexcept { return age > (int) (0.1f * sr) && level < 1.0e-4f; }
@@ -576,7 +589,7 @@ public:
         vel = velocity;
         f0 = (float) juce::MidiMessage::getMidiNoteInHertz (note);
         t = 0.0f;
-        saw.phase = 0.0f;
+        saw.phase = 0.5f;     // start at the zero crossing of the sawtooth
         subPhase = 0.0f;
         filter.reset();
         countdown = 0;

@@ -89,35 +89,65 @@ inline Match detect (const std::array<double, 12>& w, int bassPc = -1)
     return best;
 }
 
-/** Recognise chords in a clip, one per bar (consecutive equal chords are merged). Beats in song time. */
+/** Recognise chords in a clip: one per bar, or two when the harmony clearly changes halfway the bar.
+    Consecutive equal chords are merged. Beats in song time. */
 inline std::vector<ChordEvent> detectInClip (const Clip& clip, double barLength)
 {
     std::vector<ChordEvent> result;
     if (clip.notes.empty())
         return result;
 
-    for (double bar = 0.0; bar < clip.length - 1.0e-6; bar += barLength)
+    struct Found { Match m; double quality = -1.0; };
+    auto analyse = [&clip] (double from0, double to0)
     {
         std::array<double, 12> w {};
         int bass = 128;
         for (auto& n : clip.notes)
         {
-            const double from = juce::jmax (bar, n.start), to = juce::jmin (bar + barLength, n.start + n.length);
+            const double from = juce::jmax (from0, n.start), to = juce::jmin (to0, n.start + n.length);
             if (to <= from)
                 continue;
             w[(size_t) (n.note % 12)] += (to - from) * (0.5 + n.velocity / 254.0);
+            // the lowest note that starts (or sounds at the start) of this stretch counts as bass
             bass = juce::jmin (bass, n.note);
         }
-        const auto m = detect (w, bass < 128 ? bass % 12 : -1);
-        if (m.score < 0.0)
-            continue;
-
-        const double at = clip.start + bar;
+        double total = 0.0;
+        for (auto x : w)
+            total += x;
+        Found f;
+        f.m = detect (w, bass < 128 ? bass % 12 : -1);
+        f.quality = total > 0.0 ? f.m.score / total : -1.0;
+        return f;
+    };
+    auto add = [&result] (double at, double length, const Match& m)
+    {
         if (! result.empty() && result.back().root == m.root && result.back().type == m.type
             && std::abs (result.back().beat + result.back().length - at) < 1.0e-6)
-            result.back().length += barLength;
+            result.back().length += length;
         else
-            result.push_back ({ at, barLength, m.root, m.type });
+            result.push_back ({ at, length, m.root, m.type });
+    };
+
+    for (double bar = 0.0; bar < clip.length - 1.0e-6; bar += barLength)
+    {
+        const auto whole = analyse (bar, bar + barLength);
+        if (whole.m.score < 0.0)
+            continue;
+
+        // Two chords in one bar? Only when both halves are clear chords that fit better than one chord.
+        if (barLength >= 2.0 - 1.0e-6)
+        {
+            const double half = barLength * 0.5;
+            const auto a = analyse (bar, bar + half), b = analyse (bar + half, bar + barLength);
+            const bool different = a.m.root != b.m.root || a.m.type != b.m.type;
+            if (different && a.quality > 0.55 && b.quality > 0.55 && (a.quality + b.quality) * 0.5 > whole.quality + 0.12)
+            {
+                add (clip.start + bar, half, a.m);
+                add (clip.start + bar + half, half, b.m);
+                continue;
+            }
+        }
+        add (clip.start + bar, barLength, whole.m);
     }
     return result;
 }

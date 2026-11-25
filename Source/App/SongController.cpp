@@ -74,6 +74,24 @@ void SongController::stop()
     sequencer.stop();
 }
 
+void SongController::stepBars (int direction)
+{
+    const double bar = barLength (song);
+    const double pos = sequencer.getPosition();
+    double target;
+    if (direction < 0)
+    {
+        // Just past a bar line while playing (the playhead moved on): go one bar further back.
+        const double slack = sequencer.isRolling() ? 0.5 : 1.0e-6;
+        target = std::floor ((pos - slack) / bar) * bar;
+    }
+    else
+    {
+        target = (std::floor (pos / bar + 1.0e-6) + 1.0) * bar;
+    }
+    sequencer.locate (juce::jmax (0.0, target));
+}
+
 void SongController::goToStart()
 {
     sequencer.locate (song.loopEnabled && sequencer.isRolling() ? song.loopStart : 0.0);
@@ -277,7 +295,7 @@ void SongController::pushUndo (const juce::String& what)
 {
     const auto now = juce::Time::getMillisecondCounter();
     const bool merge = what == lastUndoWhat && now - lastUndoTime < 1500 && ! undoStack.empty()
-                       && (what == "Tempo" || what == "Loop");
+                       && (what == "Tempo" || what == "Loop" || what == "Transponeren");
     lastUndoWhat = what;
     lastUndoTime = now;
     redoStack.clear();
@@ -842,6 +860,154 @@ void SongController::setKeySignature (int fifths)
     pushUndo ("Toonsoort");
     song.keySignature = fifths;
     changed();
+}
+
+void SongController::insertChord (double beat, int root, int type)
+{
+    pushUndo ("Akkoord");
+    auto& c = song.chords;
+    beat = juce::jmax (0.0, beat);
+    const double bar = juce::jmax (0.25, song.beatsPerBarAsQuarters());
+    double length = bar - std::fmod (beat, bar);    // default: to the end of the bar
+    for (auto it = c.begin(); it != c.end(); ++it)
+    {
+        if (std::abs (it->beat - beat) < 1.0e-6)
+        {
+            length = it->length;                   // replace the chord that starts here
+            c.erase (it);
+            break;
+        }
+        if (beat > it->beat + 1.0e-6 && beat < it->beat + it->length - 1.0e-6)
+        {
+            length = it->beat + it->length - beat; // split the chord under this beat
+            it->length = beat - it->beat;
+            break;
+        }
+    }
+    // Never run into the next chord
+    for (auto& e : c)
+        if (e.beat > beat + 1.0e-6)
+            length = juce::jmin (length, e.beat - beat);
+    c.push_back ({ beat, juce::jmax (0.25, length), (root % 12 + 12) % 12, juce::jlimit (0, 13, type) });
+    std::sort (c.begin(), c.end(), [] (const ChordEvent& a, const ChordEvent& b) { return a.beat < b.beat; });
+    changed();
+}
+
+void SongController::setTrackTranspose (int track, int semitones)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+        return;
+    semitones = juce::jlimit (-48, 48, semitones);
+    if (song.tracks[(size_t) track].transpose == semitones)
+        return;
+    pushUndo ("Transponeren");
+    song.tracks[(size_t) track].transpose = semitones;
+    changed();
+}
+
+void SongController::applyTrackTranspose (int track)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()))
+        return;
+    auto& t = song.tracks[(size_t) track];
+    if (t.transpose == 0 || t.drums)
+        return;
+    pushUndo ("Transpositie toepassen");
+    for (auto& c : t.clips)
+        for (auto& n : c.notes)
+            n.note = juce::jlimit (0, 127, n.note + t.transpose);
+    t.transpose = 0;
+    changed();
+}
+
+int SongController::copyBars (int firstTrack, int lastTrack, double fromBeat, double toBeat, double destBeat, int trackOffset)
+{
+    if (toBeat - fromBeat < 0.25 || (std::abs (destBeat - fromBeat) < 1.0e-6 && trackOffset == 0))
+        return 0;
+    destBeat = juce::jmax (0.0, destBeat);
+    const double length = toBeat - fromBeat, destEnd = destBeat + length;
+    if (firstTrack > lastTrack)
+        std::swap (firstTrack, lastTrack);
+
+    // Collect first (source and destination can overlap), then write.
+    struct Piece { int track; Clip clip; };
+    std::vector<Piece> pieces;
+    for (int t = juce::jmax (0, firstTrack); t <= juce::jmin (lastTrack, (int) song.tracks.size() - 1); ++t)
+    {
+        const int dest = t + trackOffset;
+        if (! juce::isPositiveAndBelow (dest, (int) song.tracks.size()) || song.tracks[(size_t) t].isAudio()
+            || song.tracks[(size_t) dest].isAudio())
+            continue;
+        Clip copy;
+        copy.start = destBeat;
+        copy.length = length;
+        for (auto& c : song.tracks[(size_t) t].clips)
+        {
+            if (c.muted)
+                continue;
+            for (auto& n : c.notes)
+            {
+                const double on = c.start + n.start;
+                if (n.start >= c.length || on < fromBeat - 1.0e-6 || on >= toBeat - 1.0e-6)
+                    continue;
+                auto m = n;
+                m.start = on - fromBeat;
+                m.length = juce::jmin (n.length, c.length - n.start, toBeat - on);
+                copy.notes.push_back (m);
+            }
+            for (auto& ctl : c.controls)
+            {
+                const double at = c.start + ctl.beat;
+                if (at >= fromBeat - 1.0e-6 && at < toBeat - 1.0e-6 && ctl.beat < c.length)
+                {
+                    auto m = ctl;
+                    m.beat = at - fromBeat;
+                    copy.controls.push_back (m);
+                }
+            }
+        }
+        const int barNo = (int) std::floor (fromBeat / barLength (song) + 1.0e-6) + 1;
+        const int barCount = juce::jmax (1, (int) std::lround (length / barLength (song)));
+        copy.name = barCount > 1 ? "Kopie maat " + juce::String (barNo) + "-" + juce::String (barNo + barCount - 1)
+                                 : "Kopie maat " + juce::String (barNo);
+        pieces.push_back ({ dest, std::move (copy) });
+    }
+    if (pieces.empty())
+        return 0;
+
+    pushUndo (pieces.size() > 1 || length > barLength (song) + 1.0e-6 ? "Maten kopieren" : "Maat kopieren");
+    for (auto& p : pieces)
+    {
+        auto& track = song.tracks[(size_t) p.track];
+        // Replace what was there: remove notes that start in the destination, shorten notes running into it.
+        for (auto& c : track.clips)
+        {
+            if (c.muted || c.end() <= destBeat || c.start >= destEnd)
+                continue;
+            auto& notes = c.notes;
+            notes.erase (std::remove_if (notes.begin(), notes.end(), [&] (const SongNote& n)
+            {
+                const double on = c.start + n.start;
+                return on >= destBeat - 1.0e-6 && on < destEnd - 1.0e-6;
+            }), notes.end());
+            for (auto& n : notes)
+            {
+                const double on = c.start + n.start;
+                if (on < destBeat && on + n.length > destBeat)
+                    n.length = destBeat - on;
+            }
+            auto& controls = c.controls;
+            controls.erase (std::remove_if (controls.begin(), controls.end(), [&] (const SongControl& m)
+            {
+                const double at = c.start + m.beat;
+                return at >= destBeat - 1.0e-6 && at < destEnd - 1.0e-6;
+            }), controls.end());
+        }
+        track.clips.push_back (std::move (p.clip));
+    }
+    changed();
+    setStatus (juce::String::fromUTF8 ("Gekopieerd naar maat ") + juce::String ((int) std::floor (destBeat / barLength (song) + 1.0e-6) + 1) + ".");
+    return (int) pieces.size();
 }
 
 void SongController::removeChord (double beat)

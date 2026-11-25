@@ -101,7 +101,7 @@ std::unique_ptr<PlaybackSnapshot> PlaybackSnapshot::build (const Song& song, Aud
                 on.beat = c.start + n.start;
                 on.part = part;
                 on.data[0] = (uint8_t) (0x90 | ch);
-                on.data[1] = (uint8_t) n.note;
+                on.data[1] = (uint8_t) t.playedNote (n.note);
                 on.data[2] = (uint8_t) juce::jlimit (1, 127, n.velocity);
                 off = on;
                 off.beat = c.start + juce::jmin (n.start + n.length, c.length);

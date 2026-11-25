@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(KlankModule VERSION 0.4.0 LANGUAGES C CXX)
+project(KlankModule VERSION 0.5.0 LANGUAGES C CXX)
 
 # C++17 for everything: JUCE 8 and sfizz both build with it (sfizz breaks on C++20's char8_t).
 # Set as a cache entry too, because sfizz declares CMAKE_CXX_STANDARD as a cache variable.
@@ -224,7 +224,8 @@ if(KM_BUILD_TESTS)
         Tests/TestPhase3b.cpp
         Tests/TestPhase3c.cpp
         Tests/TestPhase3d.cpp
-        Tests/TestPhase4.cpp)
+        Tests/TestPhase4.cpp
+        Tests/TestVersion05.cpp)
     target_link_libraries(km_tests PRIVATE km_core Catch2::Catch2WithMain)
     add_dependencies(km_tests KmTestSynth_VST3 KmTestClap)
     target_compile_definitions(km_tests PRIVATE

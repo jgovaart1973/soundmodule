@@ -142,3 +142,19 @@ De audio-thread wacht nooit en alloceert niets:
 - `installer/KlankModule.iss` (Inno Setup 6): per gebruiker of voor iedereen, Startmenu, bureaublad,
   bestandskoppelingen (.kmsong/.kmperf, geopend via de opdrachtregel en `anotherInstanceStarted`),
   optioneel de piano downloaden. De CI bouwt `KlankModule-<versie>-setup-x64.exe`.
+
+## Versie 0.5
+- `Track::transpose` + `Track::playedNote()`: toegepast in `PlaybackSnapshot::build` en `Song::toMidiFile`
+  (dus ook in offline render en export), nooit op drumsporen. `SongController::setTrackTranspose` voegt
+  snelle wijzigingen samen tot een stap ongedaan maken.
+- `SongController::copyBars`: verzamelt eerst de noten/controllers van de bronmaten (van alle hoorbare
+  clips, afgekapt op het eind van de selectie) en schrijft dan per doelspoor een nieuwe clip; noten die in
+  het doelbereik beginnen worden verwijderd, noten die erin doorlopen ingekort. Eén stap ongedaan maken.
+  De Arranger houdt een `BarSelection` (maten x sporen) bij voor Shift + slepen en Ctrl+D.
+- `SongController::insertChord` splitst een akkoord als er midden in een nieuw begint;
+  `chords::detectInClip` vergelijkt per maat een akkoord voor de hele maat met twee halve maten.
+- `SongController::stepBars` voor terug- en vooruitspoelen.
+- De tik bij het afspelen kwam van het pianomodel: alle boventonen begonnen met fase 0, wat optelt tot
+  een zaagtandsprong bij elke aanslag. Nu krijgen de boventonen een gespreide beginfase en is er een
+  hamercontact van 1-4 ms; de getokkelde snaar heeft een fade-in van 0,7 ms en de fretless begint op de
+  nuldoorgang. Test: "New notes start without a click". Polyfonie van de ingebouwde synth: 48 stemmen.

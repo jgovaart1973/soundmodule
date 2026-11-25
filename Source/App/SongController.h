@@ -31,6 +31,8 @@ public:
     void togglePlay();
     void record();               ///< arms tracks if none are armed, then records (with count-in if enabled)
     void goToStart();
+    /** Rewind (-1) / forward (+1) one bar: to the previous / next bar line. */
+    void stepBars (int direction);
     void locate (double beat);
     bool isPlaying() const noexcept   { return sequencer.isRolling(); }
     bool isRecording() const noexcept { return sequencer.isRecording(); }
@@ -84,6 +86,15 @@ public:
     /** Put a chord at a beat (replaces a chord that starts there). */
     void setChord (double beat, double length, int root, int type);
     void removeChord (double beat);
+    /** A chord from 'beat' on, also in the middle of another chord (which is then split). */
+    void insertChord (double beat, int root, int type);
+    /** Playback transposition of a MIDI track in semitones. */
+    void setTrackTranspose (int track, int semitones);
+    /** Make the transposition part of the notes (and set it back to 0). */
+    void applyTrackTranspose (int track);
+    /** Copy bars [fromBeat, toBeat) of tracks [firstTrack, lastTrack] to destBeat, trackOffset tracks lower.
+        What was at the destination is replaced. MIDI tracks only. @returns number of clips made. */
+    int copyBars (int firstTrack, int lastTrack, double fromBeat, double toBeat, double destBeat, int trackOffset = 0);
     /** Key signature for the notation view (Song::autoKey = guess). */
     void setKeySignature (int fifths);
     /** Recognise the chords played in a clip and put them on the chord track. @returns how many. */

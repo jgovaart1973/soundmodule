@@ -5,10 +5,13 @@ Sluit je keyboard aan, start de app en speel. Klaar: **fase 1** (de klankmodule)
 (opnemen en arrangeren), **fase 2b** (pianorol, ongedaan maken), **fase 3a** (audiosporen en
 tempowisselingen), **fase 3b** (drumstel en drum-editor, arpeggiator, akkoordspoor), **fase 3c**
 (notenbalk, hardware-synths via MIDI-uit, MIDI-clock, SysEx), **fase 3d** (MPE, MIDI 2.0, CLAP-plug-ins)
-en **versie 0.4** (akoestische instrumenten, twee stemmen per notenbalk, triolen, installatieprogramma).
+**versie 0.4** (akoestische instrumenten, twee stemmen per notenbalk, triolen, installatieprogramma) en
+**versie 0.5** (transponeren per spoor, maten kopieren met Shift + slepen, terug- en vooruitspoelen,
+meerdere akkoorden per maat, geen tik meer bij het aanslaan van de piano).
 
 ## Installeren
-Download `KlankModule-0.4.0-setup-x64.exe` (GitHub > Releases) en start het. Je hebt geen
+Download `KlankModule-<versie>-setup-x64.exe` (GitHub > Actions > laatste build > *KlankModule-setup*) en start het.
+Een nieuwere versie installeer je gewoon over de oude heen. Je hebt geen
 beheerdersrechten nodig: standaard installeert het alleen voor jou (of kies *voor alle gebruikers*).
 Het installatieprogramma maakt een snelkoppeling in het Startmenu (en desgewenst op het bureaublad),
 koppelt `.kmsong`- en `.kmperf`-bestanden aan KlankModule (dubbelklik opent ze) en kan meteen de gratis
@@ -74,6 +77,23 @@ maakt een nieuwe clip van één maat en opent die.
 
 In de Arranger dupliceert Ctrl+D de gekozen clip; Enter opent hem in de pianorol.
 
+## Arrangeren in versie 0.5
+- **Transponeren per spoor**: in de kop van elk MIDI-spoor staat *Tr 0*. Klik op + / - (of sleep
+  omhoog/omlaag, dubbelklik = 0) om het spoor bij het afspelen in halve tonen te verschuiven; de noten
+  zelf blijven staan. Rechtsklik op de spoorkop voor snelle keuzes (octaaf, kwint ...) en *Transpositie
+  in de noten zetten*. Drumsporen worden nooit getransponeerd. MIDI- en audio-export klinken getransponeerd.
+- **Maten kopieren met Shift + slepen**:
+  - Klik op een clip: de maat onder de muis wordt geselecteerd (geel kader).
+  - Sleep over een lege plek, of Shift+klik op een andere maat of ander spoor: een **groep maten**
+    (ook over meerdere sporen).
+  - **Shift + slepen** vanuit de selectie (of vanuit een willekeurige maat) kopieert die maat of groep
+    naar de plek waar je loslaat, ook naar een ander spoor. Een groen kader toont waar de kopie komt.
+    Wat daar stond wordt vervangen. De kopie blijft geselecteerd, dus nog eens Shift + slepen gaat verder.
+  - **Ctrl+D** zet de selectie er direct achter; rechtsklik op de selectie herhaalt hem 1, 2 of 4 keer.
+  - Gewoon slepen van een clip verplaatst hem, zoals voorheen.
+- **Terug- en vooruitspoelen**: de knoppen ◀◀ en ▶▶ (ingedrukt houden spoelt door), of de toetsen
+  , en . (ook pijl links/rechts en - / + op het numerieke deel): een maat terug of verder.
+
 ## Audiosporen (fase 3a)
 Kies **+ Spoor > Audiospoor**. Een audiospoor neemt op via je audio-interface (microfoon, gitaar, line-in).
 
@@ -137,11 +157,13 @@ Elke part heeft een knop **Arp**. Daar kies je:
 
 ## Akkoordspoor (fase 3b)
 Onder het tempospoor staat het **akkoordspoor**.
-- Dubbelklik of rechtsklik op een maat om een akkoord te kiezen (12 grondtonen x 14 soorten:
-  majeur, mineur, 7, maj7, m7, dim, aug, sus2, sus4, 6, m6, add9, m7b5, dim7). Rechtsklik op een akkoord
-  om de lengte te veranderen of het te verwijderen.
+- Dubbelklik of rechtsklik op een **tel** om daar een akkoord te kiezen (12 grondtonen x 14 soorten:
+  majeur, mineur, 7, maj7, m7, dim, aug, sus2, sus4, 6, m6, add9, m7b5, dim7). **Meerdere akkoorden per
+  maat**: klik op tel 3 midden in een akkoord en kies *Akkoord vanaf maat x, tel 3*; het bestaande
+  akkoord wordt dan gesplitst. Rechtsklik op een akkoord om de lengte te veranderen (twee maten tot
+  een tel), het hele akkoord te wijzigen of het te verwijderen.
 - Rechtsklik op een MIDI-clip > **Akkoorden herkennen**: KlankModule bepaalt per maat het akkoord
-  (de basnoot telt mee) en zet ze op het akkoordspoor.
+  (de basnoot telt mee), en twee akkoorden per maat als de harmonie halverwege duidelijk wisselt.
 - **Begeleiding maken** / **Baslijn maken** (rechtsklik op het akkoordspoor) zet een nieuwe clip met
   akkoorden en/of grondtonen op het gekozen MIDI-spoor - handig als startpunt, daarna vrij te bewerken.
 
@@ -249,6 +271,8 @@ Program Change-nummers op het controlekanaal.
 | F1 / F2 | Module / Arranger |
 | Spatiebalk | Afspelen / stoppen |
 | R | Opnemen (in de Arranger) |
+| , / . (of pijl links/rechts) | Een maat terug / verder (in de Arranger) |
+| Ctrl+D | Geselecteerde maten (of clip) dupliceren (in de Arranger) |
 | Ctrl+Z / Ctrl+Y | Ongedaan maken / opnieuw (nummer) |
 | Q | Quantize (in de pianorol) |
 | Page Up / Page Down | Vorige / volgende performance |

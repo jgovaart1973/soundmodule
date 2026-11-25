@@ -66,6 +66,19 @@ private:
     double scrollBeat = 0.0;
     double lastDrawnPosition = -1.0;
     int selectedTrack = -1, selectedClip = -1;
+
+    /** Selected bars (a rectangle of whole bars x tracks) for copying with Shift + drag. */
+    struct BarSelection
+    {
+        int firstTrack = -1, lastTrack = -1;
+        double fromBeat = 0.0, toBeat = 0.0;
+        bool isActive() const noexcept { return firstTrack >= 0 && toBeat > fromBeat; }
+        bool contains (int t, double beat) const noexcept
+        {
+            return isActive() && t >= firstTrack && t <= lastTrack && beat >= fromBeat && beat < toBeat;
+        }
+    } barSelection;
+    void duplicateBarSelection();
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     static constexpr int audioFlag = 1 << 20;   ///< selectedClip >= audioFlag: an audio clip

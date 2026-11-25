@@ -18,7 +18,7 @@ namespace
         const int beatNum = (int) std::floor (inBar + 1.0e-9) + 1;
         const double seconds = s.beatToSeconds (beat);
         const int minutes = (int) (seconds / 60.0);
-        return juce::String::formatted ("Maat %d . %d     %d:%04.1f", barNum, beatNum, minutes, seconds - minutes * 60.0);
+        return juce::String::formatted ("Maat %d.%d   %d:%04.1f", barNum, beatNum, minutes, seconds - minutes * 60.0);
     }
 } // namespace
 
@@ -28,7 +28,7 @@ class ArrangerComponent::TransportBar final : public juce::Component
 public:
     explicit TransportBar (ArrangerComponent& o) : owner (o), song (o.song)
     {
-        for (auto* b : { &toStart, &play, &stopButton, &recordButton, &loopButton, &clickButton, &countInButton,
+        for (auto* b : { &toStart, &rewind, &forward, &play, &stopButton, &recordButton, &loopButton, &clickButton, &countInButton,
                          &captureButton, &addTrackButton, &songButton, &undoButton, &redoButton })
             addAndMakeVisible (*b);
         undoButton.onClick = [this] { song.undo(); };
@@ -41,6 +41,12 @@ public:
         captureButton.setTooltip ("Achteraf vastleggen: zet wat je net speelde (ook zonder opname) als clip op de tijdlijn");
 
         toStart.onClick = [this] { song.goToStart(); };
+        rewind.setTooltip ("Terugspoelen: een maat terug (ingedrukt houden = doorspoelen, toets , of pijl links)");
+        forward.setTooltip ("Vooruitspoelen: een maat verder (ingedrukt houden = doorspoelen, toets . of pijl rechts)");
+        rewind.setRepeatSpeed (350, 90);
+        forward.setRepeatSpeed (350, 90);
+        rewind.onClick = [this] { song.stepBars (-1); };
+        forward.onClick = [this] { song.stepBars (1); };
         play.onClick = [this] { song.togglePlay(); };
         stopButton.onClick = [this] { song.stop(); };
         recordButton.onClick = [this] { song.record(); };
@@ -87,7 +93,7 @@ public:
         };
 
         addAndMakeVisible (position);
-        position.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        position.setFont (juce::FontOptions (17.0f, juce::Font::bold));
         position.setColour (juce::Label::textColourId, colours::accent);
         position.setColour (juce::Label::backgroundColourId, colours::background);
 
@@ -160,19 +166,21 @@ public:
         auto r = getLocalBounds().reduced (8, 8);
         auto place = [&r] (juce::Component& c, int w) { c.setBounds (r.removeFromLeft (w)); r.removeFromLeft (6); };
         place (toStart, 40);
+        place (rewind, 40);
+        place (forward, 40);
         place (play, 52);
         place (stopButton, 44);
         place (recordButton, 44);
         r.removeFromLeft (8);
-        place (position, 230);
+        place (position, 170);
         r.removeFromLeft (8);
         place (loopButton, 60);
-        place (clickButton, 96);
-        place (countInButton, 88);
-        place (tempo, 140);
+        place (clickButton, 90);
+        place (countInButton, 82);
+        place (tempo, 130);
         place (metre, 70);
         r.removeFromLeft (8);
-        place (captureButton, 110);
+        place (captureButton, 100);
         place (addTrackButton, 86);
         r.removeFromLeft (8);
         place (undoButton, 40);
@@ -192,7 +200,8 @@ public:
 private:
     ArrangerComponent& owner;
     SongController& song;
-    juce::TextButton toStart { u8 ("|\xe2\x97\x80") }, play { u8 ("\xe2\x96\xb6") }, stopButton { u8 ("\xe2\x96\xa0") },
+    juce::TextButton toStart { u8 ("|\xe2\x97\x80") }, rewind { u8 ("\xe2\x97\x80\xe2\x97\x80") },
+                     forward { u8 ("\xe2\x96\xb6\xe2\x96\xb6") }, play { u8 ("\xe2\x96\xb6") }, stopButton { u8 ("\xe2\x96\xa0") },
                      recordButton { u8 ("\xe2\x97\x8f") }, loopButton { "Loop" }, clickButton { "Metronoom" },
                      countInButton { "Aftellen" }, captureButton { "Vastleggen" }, addTrackButton { "+ Spoor" },
                      songButton { "Nummer..." }, undoButton { u8 ("\xe2\x86\xb6") }, redoButton { u8 ("\xe2\x86\xb7") };
@@ -259,6 +268,23 @@ public:
         pan.setTooltip ("Pan");
         pan.onDragEnd = [this] { owner.song.setTrackPan (track, (float) pan.getValue()); };
 
+        // MIDI tracks: transpose on playback (semitones)
+        addChildComponent (transpose);
+        transpose.setSliderStyle (juce::Slider::IncDecButtons);
+        transpose.setIncDecButtonsMode (juce::Slider::incDecButtonsDraggable_Vertical);
+        transpose.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 44, 22);
+        transpose.setRange (-24.0, 24.0, 1.0);
+        transpose.setDoubleClickReturnValue (true, 0.0);
+        transpose.textFromValueFunction = [] (double v)
+        {
+            const int st = juce::roundToInt (v);
+            return st == 0 ? juce::String ("Tr 0") : (st > 0 ? "Tr +" : "Tr ") + juce::String (st);
+        };
+        transpose.valueFromTextFunction = [] (const juce::String& text) { return (double) text.retainCharacters ("-0123456789").getIntValue(); };
+        transpose.setTooltip ("Transponeren in halve tonen (alleen bij afspelen; de noten zelf blijven staan). "
+                              "Rechtsklik op het spoor om de transpositie in de noten te zetten.");
+        transpose.onValueChange = [this] { owner.song.setTrackTranspose (track, juce::roundToInt (transpose.getValue())); };
+
         remove.onClick = [this]
         {
             juce::Component::SafePointer<ArrangerComponent> safe (&owner);
@@ -286,6 +312,10 @@ public:
 
         const bool audio = tr.isAudio();
         partBox.setVisible (! audio);
+        transpose.setVisible (! audio);
+        transpose.setEnabled (! tr.drums);
+        transpose.setValue (tr.transpose, juce::dontSendNotification);
+        transpose.updateText();
         for (juce::Component* c : { (juce::Component*) &inputBox, (juce::Component*) &monitor, (juce::Component*) &volume, (juce::Component*) &pan })
             c->setVisible (audio);
         inputBox.setSelectedId (tr.input + 1, juce::dontSendNotification);
@@ -299,13 +329,36 @@ public:
         repaint();
     }
 
-    void mouseDown (const juce::MouseEvent&) override
+    void mouseDown (const juce::MouseEvent& e) override
     {
         owner.selectedTrack = track;
         owner.selectedClip = -1;
         owner.repaint();
         for (auto* h : owner.headers)
             h->repaint();
+        if (e.mods.isPopupMenu() && ! owner.song.getSong().tracks[(size_t) track].isAudio())
+            showTransposeMenu();
+    }
+
+    void showTransposeMenu()
+    {
+        const auto& tr = owner.song.getSong().tracks[(size_t) track];
+        juce::PopupMenu m, steps;
+        for (int st : { 12, 7, 5, 4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -7, -12 })
+            steps.addItem (1000 + st + 100, st == 0 ? juce::String ("Niet transponeren")
+                                                    : (st > 0 ? "+" : "") + juce::String (st) + (std::abs (st) == 12 ? " (octaaf)" : " halve tonen"),
+                           ! tr.drums, tr.transpose == st);
+        m.addSubMenu ("Transponeren", steps, ! tr.drums);
+        m.addItem (1, "Transpositie (" + juce::String (tr.transpose) + ") in de noten zetten", tr.transpose != 0 && ! tr.drums);
+        if (tr.drums)
+            m.addItem (2, "Drumsporen worden niet getransponeerd", false);
+        juce::Component::SafePointer<TrackHeader> safe (this);
+        m.showMenuAsync (juce::PopupMenu::Options(), [safe] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            if (r == 1) safe->owner.song.applyTrackTranspose (safe->track);
+            if (r >= 1000) safe->owner.song.setTrackTranspose (safe->track, r - 1100);
+        });
     }
 
     void resized() override
@@ -317,6 +370,11 @@ public:
         {
             top.removeFromRight (4);
             volume.setBounds (top.removeFromRight (96));
+        }
+        if (transpose.isVisible())
+        {
+            top.removeFromRight (4);
+            transpose.setBounds (top.removeFromRight (92));
         }
         name.setBounds (top);
         r.removeFromTop (4);
@@ -354,7 +412,7 @@ private:
     juce::Label name;
     juce::ComboBox partBox, inputBox;
     juce::TextButton mute { "M" }, solo { "S" }, arm { u8 ("\xe2\x97\x8f") }, remove { u8 ("\xc3\x97") }, monitor { "Mon" };
-    juce::Slider volume, pan;
+    juce::Slider volume, pan, transpose;
 };
 
 //==============================================================================
@@ -536,7 +594,8 @@ class ArrangerComponent::ChordLane final : public juce::Component, public juce::
 public:
     explicit ChordLane (ArrangerComponent& o) : owner (o)
     {
-        setTooltip ("Akkoordspoor: dubbelklik of rechtsklik om akkoorden te zetten. Herkennen: rechtsklik op een clip.");
+        setTooltip ("Akkoordspoor: dubbelklik of rechtsklik op een tel om daar een akkoord te zetten (meerdere per maat kan). "
+                    "Herkennen: rechtsklik op een clip.");
     }
 
     void paint (juce::Graphics& g) override
@@ -558,7 +617,12 @@ public:
             g.setColour (colours::learn);
             g.drawRoundedRectangle (r, 3.0f, 1.0f);
             g.setColour (colours::text);
-            g.drawText (chords::name (c), r.reduced (5.0f, 0.0f), juce::Justification::centredLeft, true);
+            // Short chords (several in a bar): smaller text, squeezed rather than cut off.
+            const auto label = chords::name (c);
+            const bool narrow = r.getWidth() < 34.0f;
+            g.setFont (juce::FontOptions (narrow ? 11.0f : 13.0f, juce::Font::bold));
+            g.drawFittedText (label, r.reduced (narrow ? 2.0f : 5.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.55f);
+            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         }
 
         if (s.chords.empty())
@@ -587,14 +651,14 @@ private:
         return nullptr;
     }
 
-    static juce::PopupMenu chordPicker()
+    static juce::PopupMenu chordPicker (int base)
     {
         juce::PopupMenu roots;
         for (int r = 0; r < 12; ++r)
         {
             juce::PopupMenu typeMenu;
             for (int t = 0; t < (int) chords::types().size(); ++t)
-                typeMenu.addItem (1000 + r * 20 + t, juce::String (chords::rootName (r)) + chords::types()[(size_t) t].suffix
+                typeMenu.addItem (base + r * 20 + t, juce::String (chords::rootName (r)) + chords::types()[(size_t) t].suffix
                                                          + (t == 0 ? " (majeur)" : t == 1 ? " (mineur)" : ""));
             roots.addSubMenu (chords::rootName (r), typeMenu);
         }
@@ -605,46 +669,56 @@ private:
     {
         const auto& s = owner.song.getSong();
         const double bar = juce::jmax (0.25, s.beatsPerBarAsQuarters());
+        const double unit = 4.0 / juce::jmax (1, s.beatUnit);              // one counted beat
         const double beat = juce::jmax (0.0, owner.xToBeat (x));
+        const double at = std::floor (beat / unit + 1.0e-6) * unit;        // snapped to the beat you clicked
         const auto* existing = chordAt (beat);
-        const double at = existing != nullptr ? existing->beat : std::floor (beat / bar) * bar;
-        const double length = existing != nullptr ? existing->length : bar;
+        const bool startsHere = existing != nullptr && std::abs (existing->beat - at) < 1.0e-6;
+        const int barNo = (int) std::floor (at / bar + 1.0e-6) + 1;
+        const int beatNo = (int) std::lround (std::fmod (at, bar) / unit) + 1;
+        const juce::String where = "maat " + juce::String (barNo) + (beatNo > 1 ? ", tel " + juce::String (beatNo) : juce::String());
 
         juce::PopupMenu m;
-        m.addSubMenu (existing != nullptr ? "Akkoord wijzigen (" + chords::name (*existing) + ")"
-                                          : "Akkoord op maat " + juce::String ((int) (at / bar) + 1), chordPicker());
+        // New chord from the beat that was clicked: splits a chord that is already there.
+        m.addSubMenu (startsHere ? "Akkoord wijzigen (" + chords::name (*existing) + ", " + where + ")"
+                                 : "Akkoord vanaf " + where, chordPicker (1000));
+        if (existing != nullptr && ! startsHere)
+            m.addSubMenu ("Hele akkoord " + chords::name (*existing) + " wijzigen", chordPicker (3000));
         if (existing != nullptr)
         {
-            m.addItem (2, "Twee maten lang", true, std::abs (existing->length - 2 * bar) < 1.0e-6);
-            m.addItem (3, "Een maat lang", true, std::abs (existing->length - bar) < 1.0e-6);
-            m.addItem (4, "Halve maat lang", true, std::abs (existing->length - bar / 2) < 1.0e-6);
-            m.addItem (5, "Akkoord verwijderen");
+            juce::PopupMenu lengths;
+            const double lens[] = { 2 * bar, bar, bar / 2, 2 * unit, unit };
+            const char* names[] = { "Twee maten", "Een maat", "Halve maat", "Twee tellen", "Een tel" };
+            for (int k = 0; k < 5; ++k)
+                lengths.addItem (10 + k, names[k], lens[k] >= 0.25, std::abs (existing->length - lens[k]) < 1.0e-6);
+            m.addSubMenu ("Lengte van " + chords::name (*existing), lengths);
+            m.addItem (5, "Akkoord " + chords::name (*existing) + " verwijderen");
         }
         m.addSeparator();
         const auto& tracks = s.tracks;
         const bool midiTrack = juce::isPositiveAndBelow (owner.selectedTrack, (int) tracks.size()) && ! tracks[(size_t) owner.selectedTrack].isAudio();
         const juce::String target = midiTrack ? " op '" + tracks[(size_t) owner.selectedTrack].name + "'" : juce::String (" (kies eerst een MIDI-spoor)");
-        m.addItem (10, "Begeleiding maken (akkoorden)" + target, midiTrack && ! s.chords.empty());
-        m.addItem (11, "Baslijn maken" + target, midiTrack && ! s.chords.empty());
-        m.addItem (12, "Akkoorden + bas maken" + target, midiTrack && ! s.chords.empty());
+        m.addItem (20, "Begeleiding maken (akkoorden)" + target, midiTrack && ! s.chords.empty());
+        m.addItem (21, "Baslijn maken" + target, midiTrack && ! s.chords.empty());
+        m.addItem (22, "Akkoorden + bas maken" + target, midiTrack && ! s.chords.empty());
 
         juce::Component::SafePointer<ChordLane> safe (this);
         const int track = owner.selectedTrack;
-        const bool hadChord = existing != nullptr;
-        const int oldRoot = hadChord ? existing->root : 0, oldType = hadChord ? existing->type : 0;
-        m.showMenuAsync (juce::PopupMenu::Options(), [safe, at, length, bar, track, oldRoot, oldType] (int r)
+        const double existingBeat = existing != nullptr ? existing->beat : 0.0;
+        const int oldRoot = existing != nullptr ? existing->root : 0, oldType = existing != nullptr ? existing->type : 0;
+        std::array<double, 5> lens { 2 * bar, bar, bar / 2, 2 * unit, unit };
+        m.showMenuAsync (juce::PopupMenu::Options(), [safe, at, existingBeat, track, oldRoot, oldType, lens] (int r)
         {
             if (safe == nullptr || r == 0)
                 return;
             auto& song = safe->owner.song;
-            if (r >= 1000)              song.setChord (at, length, (r - 1000) / 20, (r - 1000) % 20);
-            else if (r == 2)            song.setChord (at, 2 * bar, oldRoot, oldType);
-            else if (r == 3)            song.setChord (at, bar, oldRoot, oldType);
-            else if (r == 4)            song.setChord (at, bar / 2, oldRoot, oldType);
-            else if (r == 5)            song.removeChord (at);
-            else if (r == 10)           song.makeAccompaniment (track, true, false);
-            else if (r == 11)           song.makeAccompaniment (track, false, true);
-            else if (r == 12)           song.makeAccompaniment (track, true, true);
+            if (r >= 3000)              song.insertChord (existingBeat, (r - 3000) / 20, (r - 3000) % 20);
+            else if (r >= 1000)         song.insertChord (at, (r - 1000) / 20, (r - 1000) % 20);
+            else if (r >= 10 && r < 15) song.setChord (existingBeat, lens[(size_t) (r - 10)], oldRoot, oldType);
+            else if (r == 5)            song.removeChord (existingBeat);
+            else if (r == 20)           song.makeAccompaniment (track, true, false);
+            else if (r == 21)           song.makeAccompaniment (track, false, true);
+            else if (r == 22)           song.makeAccompaniment (track, true, true);
         });
     }
 
@@ -693,6 +767,38 @@ public:
             const auto& audioClips = s.tracks[(size_t) t].audioClips;
             for (int c = 0; c < (int) audioClips.size(); ++c)
                 drawAudioClip (g, s, audioClips[(size_t) c], t, c, y);
+        }
+
+        // Selected bars, and where a Shift-drag copy will land
+        if (const auto& sel = owner.barSelection; sel.isActive())
+        {
+            auto area = [&] (double from, double to, int t0, int t1)
+            {
+                const float x0 = (float) owner.beatToX (from), x1 = (float) owner.beatToX (to);
+                return juce::Rectangle<float> (x0, (float) (t0 * laneHeight + 1), x1 - x0, (float) ((t1 - t0 + 1) * laneHeight - 3));
+            };
+            const auto r = area (sel.fromBeat, sel.toBeat, sel.firstTrack, sel.lastTrack);
+            g.setColour (colours::warn.withAlpha (0.14f));
+            g.fillRect (r);
+            g.setColour (colours::warn.withAlpha (0.85f));
+            g.drawRect (r, 1.5f);
+
+            if (copying && (copyBars != 0 || copyTracks != 0))
+            {
+                const double barBeats = juce::jmax (0.25, s.beatsPerBarAsQuarters());
+                const auto d = area (sel.fromBeat + copyBars * barBeats, sel.toBeat + copyBars * barBeats, sel.firstTrack + copyTracks, sel.lastTrack + copyTracks);
+                g.setColour (colours::good.withAlpha (0.18f));
+                g.fillRect (d);
+                g.setColour (colours::good);
+                const float dashes[] = { 6.0f, 4.0f };
+                juce::Path outline;
+                outline.addRectangle (d);
+                juce::Path dashed;
+                juce::PathStrokeType (1.5f).createDashedStroke (dashed, outline, dashes, 2);
+                g.fillPath (dashed);
+                g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+                g.drawText ("+ kopie", d.reduced (6.0f, 4.0f), juce::Justification::topLeft, false);
+            }
         }
 
         const float px = (float) owner.beatToX (owner.controller.getEngine().sequencer.getPosition());
@@ -857,28 +963,80 @@ public:
         return clip >= 0;
     }
 
+    double barLen() const { return juce::jmax (0.25, owner.song.getSong().beatsPerBarAsQuarters()); }
+    double barAt (int x) const { const double b = barLen(); return std::floor (juce::jmax (0.0, owner.xToBeat (x)) / b) * b; }
+    int trackAt (int y) const { return juce::jlimit (0, juce::jmax (0, (int) owner.song.getSong().tracks.size() - 1), y / laneHeight); }
+
+    void selectBars (int t0, int t1, double b0, double b1)
+    {
+        auto& sel = owner.barSelection;
+        sel.firstTrack = juce::jmin (t0, t1);
+        sel.lastTrack = juce::jmax (t0, t1);
+        sel.fromBeat = juce::jmin (b0, b1);
+        sel.toBeat = juce::jmax (b0, b1) + barLen();
+    }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         int t = -1, c = -1;
         const bool hit = hitClip (e.getPosition(), t, c);
-        owner.selectedTrack = juce::isPositiveAndBelow (t, (int) owner.song.getSong().tracks.size()) ? t : owner.selectedTrack;
+        const bool onTrack = juce::isPositiveAndBelow (t, (int) owner.song.getSong().tracks.size());
+        owner.selectedTrack = onTrack ? t : owner.selectedTrack;
         owner.selectedClip = hit ? c : -1;
         for (auto* h : owner.headers)
             h->repaint();
+        copying = selectingBars = false;
+        copyBars = copyTracks = 0;
+        dragClip = -1;
 
-        if (e.mods.isPopupMenu() && hit)
+        if (e.mods.isPopupMenu())
         {
-            showClipMenu (t, c);
+            if (owner.barSelection.contains (t, owner.xToBeat (e.x)))
+                showSelectionMenu();
+            else if (hit)
+                showClipMenu (t, c);
             return;
         }
-
-        if (! hit)
+        if (! onTrack)
         {
+            owner.barSelection = {};
             owner.song.locate (juce::jmax (0.0, std::floor (owner.xToBeat (e.x))));
             repaint();
             return;
         }
 
+        const double bar = barAt (e.x);
+        if (e.mods.isShiftDown())
+        {
+            // Shift: drag = copy the selected bars (or this bar); click = extend the selection to here.
+            if (! owner.barSelection.contains (t, owner.xToBeat (e.x)))
+            {
+                shiftClickTrack = t;
+                shiftClickBar = bar;
+                copyFromNewBar = true;
+            }
+            else
+            {
+                copyFromNewBar = false;
+            }
+            copying = true;
+            repaint();
+            return;
+        }
+
+        anchorTrack = t;
+        anchorBar = bar;
+        if (! hit)
+        {
+            // Empty spot: drag selects bars, a click places the playhead.
+            selectingBars = true;
+            owner.barSelection = {};
+            repaint();
+            return;
+        }
+
+        // A clip: the bar under the mouse becomes the selection; dragging moves the clip.
+        selectBars (t, t, bar, bar);
         dragTrack = t;
         dragClip = c;
         dragDelta = 0.0;
@@ -888,6 +1046,32 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (copying)
+        {
+            if (e.getDistanceFromDragStart() < 5)
+                return;
+            if (copyFromNewBar)
+            {
+                selectBars (shiftClickTrack, shiftClickTrack, shiftClickBar, shiftClickBar);
+                copyFromNewBar = false;
+            }
+            const double barPx = barLen() * owner.pixelsPerBeat;
+            const auto& sel = owner.barSelection;
+            const int numTracks = (int) owner.song.getSong().tracks.size();
+            copyBars = juce::jmax ((int) std::round (-sel.fromBeat / barLen()), (int) std::round (e.getDistanceFromDragStartX() / barPx));
+            copyTracks = juce::jlimit (-sel.firstTrack, numTracks - 1 - sel.lastTrack, (int) std::round ((double) e.getDistanceFromDragStartY() / laneHeight));
+            setMouseCursor (juce::MouseCursor::CopyingCursor);
+            repaint();
+            return;
+        }
+        if (selectingBars)
+        {
+            if (std::abs (e.getDistanceFromDragStartX()) < 4 && std::abs (e.getDistanceFromDragStartY()) < 4)
+                return;
+            selectBars (anchorTrack, trackAt (e.y), anchorBar, barAt (e.x));
+            repaint();
+            return;
+        }
         if (dragClip < 0 || std::abs (e.getDistanceFromDragStartX()) < 4)
             return;
         dragging = true;
@@ -895,8 +1079,52 @@ public:
         repaint();
     }
 
-    void mouseUp (const juce::MouseEvent&) override
+    void mouseUp (const juce::MouseEvent& e) override
     {
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+        if (copying)
+        {
+            copying = false;
+            auto& sel = owner.barSelection;
+            if (copyBars != 0 || copyTracks != 0)
+            {
+                const double offset = copyBars * barLen();
+                if (owner.song.copyBars (sel.firstTrack, sel.lastTrack, sel.fromBeat, sel.toBeat, sel.fromBeat + offset, copyTracks) > 0)
+                {
+                    // Select the copy, so the next Shift-drag continues from there.
+                    sel.fromBeat += offset;
+                    sel.toBeat += offset;
+                    sel.firstTrack += copyTracks;
+                    sel.lastTrack += copyTracks;
+                }
+            }
+            else if (copyFromNewBar && e.getDistanceFromDragStart() < 5)
+            {
+                // Shift-click: extend the selection (or start one) to this bar and track.
+                if (sel.isActive())
+                {
+                    const int t0 = juce::jmin (sel.firstTrack, shiftClickTrack), t1 = juce::jmax (sel.lastTrack, shiftClickTrack);
+                    const double b0 = juce::jmin (sel.fromBeat, shiftClickBar), b1 = juce::jmax (sel.toBeat - barLen(), shiftClickBar);
+                    selectBars (t0, t1, b0, b1);
+                }
+                else
+                {
+                    selectBars (shiftClickTrack, shiftClickTrack, shiftClickBar, shiftClickBar);
+                }
+            }
+            copyBars = copyTracks = 0;
+            repaint();
+            return;
+        }
+        if (selectingBars)
+        {
+            selectingBars = false;
+            if (! owner.barSelection.isActive())
+                owner.song.locate (juce::jmax (0.0, std::floor (owner.xToBeat (e.x))));
+            repaint();
+            return;
+        }
+
         if (dragging && dragClip >= audioFlag)
         {
             const int c = dragClip & ~audioFlag;
@@ -908,9 +1136,33 @@ public:
             const auto& clip = owner.song.getSong().tracks[(size_t) dragTrack].clips[(size_t) dragClip];
             owner.song.moveClip (dragTrack, dragClip, juce::jmax (0.0, owner.snap (clip.start + dragDelta)));
         }
+        if (dragging && dragClip >= 0)
+            owner.barSelection = {};
         dragging = false;
         dragClip = -1;
         repaint();
+    }
+
+    void showSelectionMenu()
+    {
+        const auto& sel = owner.barSelection;
+        const int bars = juce::jmax (1, (int) std::lround ((sel.toBeat - sel.fromBeat) / barLen()));
+        juce::PopupMenu m;
+        m.addItem (1, "Dupliceren: " + juce::String (bars) + (bars == 1 ? " maat" : " maten") + " er direct achter (Ctrl+D)");
+        m.addItem (2, "Twee keer herhalen");
+        m.addItem (3, "Vier keer herhalen");
+        m.addSeparator();
+        m.addItem (4, "Selectie opheffen");
+        m.addItem (5, "Tip: Shift + slepen kopieert de selectie naar een andere maat of spoor", false);
+        juce::Component::SafePointer<Lanes> safe (this);
+        m.showMenuAsync (juce::PopupMenu::Options(), [safe] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            if (r == 4) { safe->owner.barSelection = {}; safe->repaint(); return; }
+            const int times = r == 1 ? 1 : r == 2 ? 2 : 4;
+            for (int i = 0; i < times; ++i)
+                safe->owner.duplicateBarSelection();
+        });
     }
 
     void showClipMenu (int t, int c)
@@ -1018,6 +1270,11 @@ private:
     int dragTrack = -1, dragClip = -1;
     double dragDelta = 0.0;
     bool dragging = false;
+
+    // Bar selection and Shift-drag copy
+    bool selectingBars = false, copying = false, copyFromNewBar = false;
+    int anchorTrack = 0, shiftClickTrack = 0, copyBars = 0, copyTracks = 0;
+    double anchorBar = 0.0, shiftClickBar = 0.0;
 };
 
 //==============================================================================
@@ -1173,17 +1430,38 @@ void ArrangerComponent::paint (juce::Graphics& g)
     g.drawText ("Akkoorden", 10, 54 + rulerHeight + tempoHeight, headerWidth - 20, chordHeight, juce::Justification::centredLeft);
 }
 
+void ArrangerComponent::duplicateBarSelection()
+{
+    auto& sel = barSelection;
+    if (! sel.isActive())
+        return;
+    const double length = sel.toBeat - sel.fromBeat;
+    if (song.copyBars (sel.firstTrack, sel.lastTrack, sel.fromBeat, sel.toBeat, sel.toBeat) > 0)
+    {
+        sel.fromBeat += length;
+        sel.toBeat += length;
+    }
+    repaint();
+}
+
 bool ArrangerComponent::keyPressed (const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::spaceKey)              { song.togglePlay(); return true; }
     if (key == juce::KeyPress ('r', 0, 'r') || key == juce::KeyPress ('R', 0, 'R')) { song.record(); return true; }
     if (key == juce::KeyPress::homeKey)               { song.goToStart(); return true; }
+    if (key.getKeyCode() == ',' || key == juce::KeyPress (juce::KeyPress::leftKey)  || key.getKeyCode() == juce::KeyPress::numberPadSubtract) { song.stepBars (-1); return true; }
+    if (key.getKeyCode() == '.' || key == juce::KeyPress (juce::KeyPress::rightKey) || key.getKeyCode() == juce::KeyPress::numberPadAdd)      { song.stepBars (1); return true; }
     if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z'))
     {
         key.getModifiers().isShiftDown() ? song.redo() : song.undo();
         return true;
     }
     if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'Y' || key.getKeyCode() == 'y')) { song.redo(); return true; }
+    if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'D' || key.getKeyCode() == 'd') && barSelection.isActive())
+    {
+        duplicateBarSelection();
+        return true;
+    }
     if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'D' || key.getKeyCode() == 'd') && selectedClip >= 0 && selectedClip < audioFlag)
     {
         selectedClip = song.duplicateClip (selectedTrack, selectedClip);

@@ -164,6 +164,8 @@ juce::String Song::toJson() const
         to->setProperty ("solo", t.solo);
         if (t.drums)
             to->setProperty ("drums", true);
+        if (t.transpose != 0)
+            to->setProperty ("transpose", t.transpose);
 
         juce::Array<juce::var> clipList;
         for (auto& c : t.clips)
@@ -251,6 +253,7 @@ bool Song::fromJson (const juce::String& json, juce::String& error)
             t.mute = (bool) prop (tv, "mute", false);
             t.solo = (bool) prop (tv, "solo", false);
             t.drums = (bool) prop (tv, "drums", false);
+            t.transpose = juce::jlimit (-48, 48, (int) prop (tv, "transpose", 0));
             t.kind = prop (tv, "kind", "midi").toString() == "audio" ? Track::Kind::audio : Track::Kind::midi;
             t.volumeDb = juce::jlimit (-80.0f, 12.0f, (float) (double) prop (tv, "volumeDb", 0.0));
             t.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) prop (tv, "pan", 0.0));
@@ -357,8 +360,8 @@ juce::MidiFile Song::toMidiFile() const
                     continue;
                 const double on = c.start + n.start;
                 const double off = c.start + juce::jmin (n.start + n.length, c.length);
-                seq.addEvent (juce::MidiMessage::noteOn (channel, n.note, (juce::uint8) n.velocity), tick (on));
-                seq.addEvent (juce::MidiMessage::noteOff (channel, n.note), tick (off));
+                seq.addEvent (juce::MidiMessage::noteOn (channel, t.playedNote (n.note), (juce::uint8) n.velocity), tick (on));
+                seq.addEvent (juce::MidiMessage::noteOff (channel, t.playedNote (n.note)), tick (off));
             }
             for (auto& m : c.controls)
                 if (m.beat < c.length)

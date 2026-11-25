@@ -154,6 +154,11 @@ De audio-thread wacht nooit en alloceert niets:
 - `SongController::insertChord` splitst een akkoord als er midden in een nieuw begint;
   `chords::detectInClip` vergelijkt per maat een akkoord voor de hele maat met twee halve maten.
 - `SongController::stepBars` voor terug- en vooruitspoelen.
+- Volume/pan per MIDI-spoor (0.5.1): `Song::trackMixForParts` bepaalt per part de fader en pan van het
+  (eerste) MIDI-spoor dat hem speelt; `SongController::applyTrackMix` zet dat bij elke wijziging in
+  `PartParams::trackGain / trackPan`, die `Part::render` (gladgestreken) bovenop de part-fader en -pan
+  toepast. `previewTrackMix` maakt slepen hoorbaar zonder undo-stap; de offline renderer gebruikt
+  dezelfde functie.
 - De tik bij het afspelen kwam van het pianomodel: alle boventonen begonnen met fase 0, wat optelt tot
   een zaagtandsprong bij elke aanslag. Nu krijgen de boventonen een gespreide beginfase en is er een
   hamercontact van 1-4 ms; de getokkelde snaar heeft een fade-in van 0,7 ms en de fretless begint op de

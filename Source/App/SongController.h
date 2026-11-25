@@ -90,6 +90,10 @@ public:
     void insertChord (double beat, int root, int type);
     /** Playback transposition of a MIDI track in semitones. */
     void setTrackTranspose (int track, int semitones);
+    /** Push the MIDI tracks' fader / pan to the parts they play (called on every change). */
+    void applyTrackMix();
+    /** Hear a fader / pan move on a MIDI track while dragging (commit with setTrackVolume / setTrackPan). */
+    void previewTrackMix (int track, float db, float pan);
     /** Make the transposition part of the notes (and set it back to 0). */
     void applyTrackTranspose (int track);
     /** Copy bars [fromBeat, toBeat) of tracks [firstTrack, lastTrack] to destBeat, trackOffset tracks lower.

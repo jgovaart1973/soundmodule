@@ -397,9 +397,9 @@ void Part::render (juce::AudioBuffer<float>& mainBus,
 
     // Fader, pan, mute/solo and post-fader sends (all smoothed to avoid zipper noise).
     const bool muted = params.mute.load() || (anySoloActive && ! params.solo.load());
-    const float vol = muted ? 0.0f : juce::Decibels::decibelsToGain (params.volumeDb.load(), -80.0f);
+    const float vol = muted ? 0.0f : juce::Decibels::decibelsToGain (params.volumeDb.load(), -80.0f) * params.trackGain.load();
     float pl = 1.0f, pr = 1.0f;
-    filter::panGains (params.pan.load(), pl, pr);
+    filter::panGains (juce::jlimit (-1.0f, 1.0f, params.pan.load() + params.trackPan.load()), pl, pr);
 
     gainLeft.setTargetValue (vol * pl);
     gainRight.setTargetValue (vol * pr);

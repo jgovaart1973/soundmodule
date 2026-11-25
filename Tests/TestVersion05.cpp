@@ -239,3 +239,62 @@ TEST_CASE ("New notes start without a click", "[click]")
         REQUIRE (onsetStep < 0.6f * steadyStep + 0.01f);
     }
 }
+
+TEST_CASE ("Volume and pan per MIDI track act on its part, also in the export", "[trackmix]")
+{
+    Song s;
+    s.tracks.push_back (midiTrack (0, { { 0, 2, 60, 100, 1 } }));
+    s.tracks.push_back (midiTrack (0, { { 0, 2, 64, 100, 1 } }));   // shares part 1: first track decides
+    s.tracks.push_back (midiTrack (2, { { 0, 2, 67, 100, 1 } }));
+    s.tracks[0].volumeDb = -6.0f;
+    s.tracks[0].pan = -0.5f;
+    s.tracks[1].volumeDb = -40.0f;
+    s.tracks[2].pan = 1.0f;
+
+    std::vector<float> gain, pan;
+    s.trackMixForParts (gain, pan, kNumParts);
+    REQUIRE_THAT (gain[0], WithinAbs (juce::Decibels::decibelsToGain (-6.0f), 1e-5));
+    REQUIRE_THAT (pan[0], WithinAbs (-0.5, 1e-6));
+    REQUIRE_THAT (gain[1], WithinAbs (1.0, 1e-6));     // no track: unchanged
+    REQUIRE_THAT (pan[2], WithinAbs (1.0, 1e-6));
+
+    App a;
+    a.load (s);
+    auto& p0 = a.app.getEngine().getPart (0).params;
+    REQUIRE_THAT (p0.trackGain.load(), WithinAbs (juce::Decibels::decibelsToGain (-6.0f), 1e-5));
+    a.song().setTrackVolume (0, 0.0f);
+    REQUIRE_THAT (p0.trackGain.load(), WithinAbs (1.0, 1e-5));
+    a.song().previewTrackMix (0, -12.0f, 0.25f);
+    REQUIRE_THAT (p0.trackPan.load(), WithinAbs (0.25, 1e-6));
+    a.song().undo();   // back to -6 dB, preview forgotten
+    REQUIRE_THAT (p0.trackGain.load(), WithinAbs (juce::Decibels::decibelsToGain (-6.0f), 1e-5));
+    REQUIRE_THAT (p0.trackPan.load(), WithinAbs (-0.5, 1e-6));
+
+    // Audible: a part fully panned right is silent on the left.
+    BuiltInSynth synth (2);
+    synth.prepare (48000.0, 256);
+    auto& part = a.app.getEngine().getPart (5);
+    part.params.enabled = true;
+    part.params.reverbSend = 0.0f;
+    part.params.delaySend = 0.0f;
+    part.params.trackPan = 1.0f;
+    part.lend (&synth);
+    juce::AudioBuffer<float> out (2, 256);
+    MidiEvent on = MidiEvent::make (-1, 0x90, 60, 100);
+    on.targetPart = 5;
+    int pos = 0;
+    a.app.getEngine().process (out, 256, &on, &pos, 1, nullptr, 0);
+    float l = 0.0f, r = 0.0f;
+    for (int k = 0; k < 10; ++k)
+    {
+        a.app.getEngine().process (out, 256, nullptr, nullptr, 0, nullptr, 0);
+        l = juce::jmax (l, out.getMagnitude (0, 0, 256));
+        r = juce::jmax (r, out.getMagnitude (1, 0, 256));
+    }
+    REQUIRE (r > 0.01f);
+    REQUIRE (l < r * 0.05f);
+    a.app.getEngine().requestPanic();
+    a.app.getEngine().process (out, 256, nullptr, nullptr, 0, nullptr, 0);
+    juce::Array<Instrument*> back;
+    part.reclaimAll (back);
+}

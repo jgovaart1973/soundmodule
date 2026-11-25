@@ -138,10 +138,10 @@ juce::String Song::toJson() const
         to->setProperty ("name", t.name);
         to->setProperty ("kind", t.isAudio() ? "audio" : "midi");
         to->setProperty ("part", t.part + 1);
+        to->setProperty ("volumeDb", t.volumeDb);   // every track has a fader and pan
+        to->setProperty ("pan", t.pan);
         if (t.isAudio())
         {
-            to->setProperty ("volumeDb", t.volumeDb);
-            to->setProperty ("pan", t.pan);
             to->setProperty ("input", t.input);
             to->setProperty ("monitor", t.monitor);
             juce::Array<juce::var> audioList;
@@ -349,6 +349,12 @@ juce::MidiFile Song::toMidiFile() const
         juce::MidiMessageSequence seq;
         seq.addEvent (juce::MidiMessage::textMetaEvent (3, t.name));
         const int channel = t.part + 1; // channel = part number, so importing maps back to the same part
+
+        // Track fader / pan as GM volume (CC7, 40*log10 curve) and pan (CC10) at the start
+        if (std::abs (t.volumeDb) > 0.05f)
+            seq.addEvent (juce::MidiMessage::controllerEvent (channel, 7, juce::jlimit (0, 127, juce::roundToInt (100.0 * std::pow (10.0, t.volumeDb / 40.0)))), 0.0);
+        if (std::abs (t.pan) > 0.005f)
+            seq.addEvent (juce::MidiMessage::controllerEvent (channel, 10, juce::jlimit (0, 127, juce::roundToInt (64.0 + t.pan * 63.0))), 0.0);
 
         for (auto& c : t.clips)
         {

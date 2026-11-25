@@ -108,6 +108,13 @@ juce::AudioBuffer<float> OfflineRenderer::renderSong (const Song& song, AudioCac
     seq.loopEnabled = false;
     seq.metronomeOn = false;
     seq.setSnapshot (PlaybackSnapshot::build (song, &cache, sampleRate, false));
+    std::vector<float> trackGain, trackPan;
+    song.trackMixForParts (trackGain, trackPan, kNumParts);
+    for (int i = 0; i < kNumParts; ++i)
+    {
+        engine.getPart (i).params.trackGain = trackGain[(size_t) i];
+        engine.getPart (i).params.trackPan = trackPan[(size_t) i];
+    }
     seq.locate (0.0);
     seq.play();
 

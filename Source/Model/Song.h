@@ -123,6 +123,23 @@ struct Song
     void removeTempoChange (double beat);
     double audioClipEndBeat (const AudioClip& c) const noexcept { return secondsToBeat (beatToSeconds (c.start) + c.duration); }
 
+    /** Fader (linear gain) and pan of the MIDI track that plays each part (1 / 0 when none).
+        Tracks that share a part share the setting of the first of them. */
+    void trackMixForParts (std::vector<float>& gain, std::vector<float>& pan, int numParts) const
+    {
+        gain.assign ((size_t) numParts, 1.0f);
+        pan.assign ((size_t) numParts, 0.0f);
+        std::vector<bool> done ((size_t) numParts, false);
+        for (auto& t : tracks)
+        {
+            if (t.isAudio() || ! juce::isPositiveAndBelow (t.part, numParts) || done[(size_t) t.part])
+                continue;
+            done[(size_t) t.part] = true;
+            gain[(size_t) t.part] = juce::Decibels::decibelsToGain (t.volumeDb, -80.0f);
+            pan[(size_t) t.part] = juce::jlimit (-1.0f, 1.0f, t.pan);
+        }
+    }
+
     juce::String toJson() const;
     bool fromJson (const juce::String& json, juce::String& error);
     bool saveTo (const juce::File& file) const;

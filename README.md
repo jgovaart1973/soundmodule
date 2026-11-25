@@ -82,6 +82,12 @@ In de Arranger dupliceert Ctrl+D de gekozen clip; Enter opent hem in de pianorol
   omhoog/omlaag, dubbelklik = 0) om het spoor bij het afspelen in halve tonen te verschuiven; de noten
   zelf blijven staan. Rechtsklik op de spoorkop voor snelle keuzes (octaaf, kwint ...) en *Transpositie
   in de noten zetten*. Drumsporen worden nooit getransponeerd. MIDI- en audio-export klinken getransponeerd.
+- **Volume en pan per spoor** (versie 0.5.1): elk spoor heeft in de kop een volumeschuif (dubbelklik =
+  0 dB) en een panknop (dubbelklik = midden). Je hoort het direct tijdens het slepen. Bij een MIDI-spoor
+  werkt het op de part die het spoor speelt, bovenop het volume en de pan van die part in de Module.
+  Spelen twee MIDI-sporen dezelfde part, dan geldt de instelling van het bovenste (de part heeft één
+  uitgang); bij het andere spoor staan de regelaars dan uit. Het geldt ook voor audio-export, en in een
+  MIDI-export staat het als volume (CC7) en pan (CC10).
 - **Maten kopieren met Shift + slepen**:
   - Klik op een clip: de maat onder de muis wordt geselecteerd (geel kader).
   - Sleep over een lege plek, of Shift+klik op een andere maat of ander spoor: een **groep maten**

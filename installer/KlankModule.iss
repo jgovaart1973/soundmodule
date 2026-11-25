@@ -9,7 +9,7 @@
 ; "install for all users" in the first page.
 
 #ifndef AppVersion
-  #define AppVersion "0.5.0"
+  #define AppVersion "0.5.1"
 #endif
 #ifndef BuildDir
   #define BuildDir "..\build"

@@ -59,9 +59,38 @@ void SongController::changed (bool markDirty)
     // While recording, armed tracks stay silent so you do not hear the old take doubled.
     sequencer.setSnapshot (PlaybackSnapshot::build (song, &audioCache, sequencer.getSampleRate(),
                                                     takesOpen || ! audioRecordings.empty()));
+    applyTrackMix();
 
     if (onSongChanged)
         onSongChanged();
+}
+
+void SongController::applyTrackMix()
+{
+    std::vector<float> gain, pan;
+    song.trackMixForParts (gain, pan, kNumParts);
+    for (int i = 0; i < kNumParts; ++i)
+    {
+        auto& p = app.getEngine().getPart (i).params;
+        p.trackGain = gain[(size_t) i];
+        p.trackPan = pan[(size_t) i];
+    }
+}
+
+void SongController::previewTrackMix (int track, float db, float panValue)
+{
+    if (! juce::isPositiveAndBelow (track, (int) song.tracks.size()) || song.tracks[(size_t) track].isAudio())
+        return;
+    // Live while dragging (no undo step yet), only if this track is the one that sets its part's mix.
+    const int part = song.tracks[(size_t) track].part;
+    for (int t = 0; t < track; ++t)
+        if (! song.tracks[(size_t) t].isAudio() && song.tracks[(size_t) t].part == part)
+            return;
+    if (! juce::isPositiveAndBelow (part, kNumParts))
+        return;
+    auto& p = app.getEngine().getPart (part).params;
+    p.trackGain = juce::Decibels::decibelsToGain (db, -80.0f);
+    p.trackPan = juce::jlimit (-1.0f, 1.0f, panValue);
 }
 
 //==============================================================================

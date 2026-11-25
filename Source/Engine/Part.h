@@ -40,6 +40,10 @@ struct PartParams
 
     // MPE (per-note expression): the part tells its sound "lower zone, 15 member channels, bend +-48"
     std::atomic<bool>  mpe { false };
+
+    // Track fader and pan from the arranger (the MIDI track(s) that play this part), on top of the part's own
+    std::atomic<float> trackGain { 1.0f };   ///< linear
+    std::atomic<float> trackPan { 0.0f };    ///< -1..1, added to the part's pan
 };
 
 /** A Program Change that needs a decision on the message thread. */

@@ -258,15 +258,35 @@ public:
         volume.setDoubleClickReturnValue (true, 0.0);
         volume.setPopupDisplayEnabled (true, true, nullptr);
         volume.textFromValueFunction = [] (double v) { return juce::String (v, 1) + " dB"; };
+        volume.setTooltip ("Volume van dit spoor (dubbelklik = 0 dB)");
         volume.onDragEnd = [this] { owner.song.setTrackVolume (track, (float) volume.getValue()); };
-        volume.onValueChange = [this] { if (volume.getThumbBeingDragged() < 0) owner.song.setTrackVolume (track, (float) volume.getValue()); };
+        volume.onValueChange = [this]
+        {
+            if (volume.getThumbBeingDragged() < 0)
+                owner.song.setTrackVolume (track, (float) volume.getValue());
+            else
+                owner.song.previewTrackMix (track, (float) volume.getValue(), (float) pan.getValue());
+        };
         addChildComponent (pan);
         pan.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         pan.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         pan.setRange (-1.0, 1.0);
         pan.setDoubleClickReturnValue (true, 0.0);
-        pan.setTooltip ("Pan");
+        pan.setTooltip ("Pan: links / rechts (dubbelklik = midden)");
+        pan.setPopupDisplayEnabled (true, true, nullptr);
+        pan.textFromValueFunction = [] (double v)
+        {
+            const int p = juce::roundToInt (v * 100.0);
+            return p == 0 ? juce::String ("Midden") : (p < 0 ? "L " + juce::String (-p) : "R " + juce::String (p));
+        };
         pan.onDragEnd = [this] { owner.song.setTrackPan (track, (float) pan.getValue()); };
+        pan.onValueChange = [this]
+        {
+            if (pan.getThumbBeingDragged() < 0)
+                owner.song.setTrackPan (track, (float) pan.getValue());   // double-click reset
+            else
+                owner.song.previewTrackMix (track, (float) volume.getValue(), (float) pan.getValue());
+        };
 
         // MIDI tracks: transpose on playback (semitones)
         addChildComponent (transpose);
@@ -316,8 +336,19 @@ public:
         transpose.setEnabled (! tr.drums);
         transpose.setValue (tr.transpose, juce::dontSendNotification);
         transpose.updateText();
-        for (juce::Component* c : { (juce::Component*) &inputBox, (juce::Component*) &monitor, (juce::Component*) &volume, (juce::Component*) &pan })
+        for (juce::Component* c : { (juce::Component*) &inputBox, (juce::Component*) &monitor })
             c->setVisible (audio);
+        volume.setVisible (true);   // every track has a fader and pan
+        pan.setVisible (true);
+        juce::String shared;
+        if (! audio)
+            for (int t = 0; t < track; ++t)
+                if (! owner.song.getSong().tracks[(size_t) t].isAudio() && owner.song.getSong().tracks[(size_t) t].part == tr.part)
+                    shared = owner.song.getSong().tracks[(size_t) t].name;
+        volume.setEnabled (shared.isEmpty());
+        pan.setEnabled (shared.isEmpty());
+        if (shared.isNotEmpty())
+            volume.setTooltip ("Dit spoor speelt dezelfde part als '" + shared + "': volume en pan van dat spoor gelden.");
         inputBox.setSelectedId (tr.input + 1, juce::dontSendNotification);
         monitor.setToggleState (tr.monitor, juce::dontSendNotification);
         if (volume.getThumbBeingDragged() < 0)
@@ -366,11 +397,8 @@ public:
         auto r = getLocalBounds().reduced (6, 5);
         auto top = r.removeFromTop (24);
         remove.setBounds (top.removeFromRight (24));
-        if (volume.isVisible())
-        {
-            top.removeFromRight (4);
-            volume.setBounds (top.removeFromRight (96));
-        }
+        top.removeFromRight (4);
+        volume.setBounds (top.removeFromRight (90));
         if (transpose.isVisible())
         {
             top.removeFromRight (4);
@@ -385,10 +413,10 @@ public:
         bottom.removeFromRight (3);
         mute.setBounds (bottom.removeFromRight (28));
         bottom.removeFromRight (6);
+        pan.setBounds (bottom.removeFromRight (24));
+        bottom.removeFromRight (3);
         if (inputBox.isVisible())
         {
-            pan.setBounds (bottom.removeFromRight (24));
-            bottom.removeFromRight (3);
             monitor.setBounds (bottom.removeFromRight (40));
             bottom.removeFromRight (3);
             inputBox.setBounds (bottom);

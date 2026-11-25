@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(KlankModule VERSION 0.5.0 LANGUAGES C CXX)
+project(KlankModule VERSION 0.5.1 LANGUAGES C CXX)
 
 # C++17 for everything: JUCE 8 and sfizz both build with it (sfizz breaks on C++20's char8_t).
 # Set as a cache entry too, because sfizz declares CMAKE_CXX_STANDARD as a cache variable.

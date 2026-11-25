@@ -82,7 +82,7 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     static constexpr int audioFlag = 1 << 20;   ///< selectedClip >= audioFlag: an audio clip
-    static constexpr int headerWidth = 250;
+    static constexpr int headerWidth = 330;
     static constexpr int laneHeight = 64;
     static constexpr int rulerHeight = 26;
     static constexpr int tempoHeight = 30;
